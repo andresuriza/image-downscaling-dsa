@@ -1,22 +1,24 @@
 `timescale 1ns/1ps
 
-module tb_downscale_bilinear_minimal;
+module downscaling_tb;
 
     localparam int IMG_W = 4;
     localparam int IMG_H = 4;
-    localparam int OUT_W = 2;
-    localparam int OUT_H = 2;
+	 localparam ratio = 0.5;
+    localparam int local_out_w = IMG_W * ratio;
+    localparam int local_out_h = IMG_H * ratio;
 
     logic clk;
     logic rst_n;
     logic done;
+	 
+	 integer i, j;
 
     // Instancia del módulo
-    downscale_bilinear_minimal #(
+    downscaling #(
         .IMG_W(IMG_W),
         .IMG_H(IMG_H),
-        .OUT_W(OUT_W),
-        .OUT_H(OUT_H)
+		  .ratio(ratio)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
@@ -51,10 +53,10 @@ module tb_downscale_bilinear_minimal;
         @(posedge clk);
 
         // Mostrar la imagen reducida
-        integer i, j;
-        $display("\nImagen de salida (%0dx%0d):", OUT_H, OUT_W);
-        for (i = 0; i < OUT_H; i++) begin
-            for (j = 0; j < OUT_W; j++) begin
+
+        $display("\nImagen de salida (%0dx%0d):", local_out_w, local_out_h);
+        for (i = 0; i < local_out_w; i++) begin
+            for (j = 0; j < local_out_h; j++) begin
                 $write("%4d ", dut.img_out[i][j]);
             end
             $write("\n");

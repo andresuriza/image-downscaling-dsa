@@ -1,6 +1,8 @@
 db
 incremental_db
 output_files
+simulation
 *.sv.bak
 *.qpf
 *.qsf
+*.rpt
