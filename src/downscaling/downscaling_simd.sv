@@ -1,132 +1,158 @@
 module downscaling_simd #(
-    parameter int W = 512,
-    parameter int H = 512,
-    parameter int NEW_W = 256,
-    parameter int NEW_H = 256,
-    parameter int FP = 8,
-    parameter int LANES = 4
+    parameter WIDTH = 512,
+    parameter HEIGHT = 512,
+    parameter SCALE = 0.5,
+    parameter int LANES = 4,
+    parameter int OUT_W = WIDTH * SCALE,
+    parameter int OUT_H = HEIGHT * SCALE
 )(
-    input  logic clk,
-    input  logic rst,
-    input  logic [7:0] bank_mem [LANES-1:0][H-1:0][ ((W + LANES-1)/LANES) - 1 : 0 ],
-    output logic [7:0] pixel_out [LANES-1:0],
-    output logic valid
+    input logic clk,
+    input logic rst,
+    input logic [7:0] bank_mem[LANES-1:0][HEIGHT-1:0][(WIDTH+LANES-1)/LANES - 1:0],
+    output logic [7:0] pixel_out[LANES-1:0]
 );
 
-    localparam int RFP_WIDTH = 16;
-    logic [RFP_WIDTH-1:0] x_ratio_fp, y_ratio_fp;
-    initial begin
-        x_ratio_fp = ((W - 1) << FP) / (NEW_W - 1);
-        y_ratio_fp = ((H - 1) << FP) / (NEW_H - 1);
+    logic [15:0] x_ratio;
+    logic [15:0] y_ratio;
+
+	initial begin
+        x_ratio = ((WIDTH - 1) << 8) / (OUT_W - 1);
+        y_ratio = ((HEIGHT - 1) << 8) / (OUT_H - 1);
     end
 
-    logic [$clog2(NEW_W)-1 + 1:0] j_base;
-    logic [$clog2(NEW_H)-1:0] i_cnt;
+    logic [$clog2(OUT_W) - 1 + 1:0] j;
+    logic [$clog2(OUT_H) - 1:0] i;
 
+    // Calculo de indices para division de trabajo por lanes
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
-            j_base <= 0;
-            i_cnt <= 0;
-        end else begin
-            if (j_base + LANES >= NEW_W) begin
-                j_base <= 0;
-                if (i_cnt == NEW_H - 1) i_cnt <= 0;
-                else i_cnt <= i_cnt + 1;
-            end else begin
-                j_base <= j_base + LANES;
+            j <= 0;
+            i <= 0;
+        end
+
+        else begin
+            if (j + LANES >= OUT_W) begin
+                j <= 0;
+
+                if (i == OUT_H - 1) begin
+                    i <= 0;
+                end
+
+                else begin
+                    i <= i + 1;
+                end
+            end
+            else begin
+                j <= j + LANES;
             end
         end
     end
 
-    logic [LANES-1:0][RFP_WIDTH-1:0] x_fp;
-    logic [LANES-1:0][RFP_WIDTH-1:0] y_fp;
+    logic [LANES-1:0][15:0] x;
+    logic [LANES-1:0][15:0] y;
 
-    logic [LANES-1:0][$clog2(W)-1:0] x_l;
-    logic [LANES-1:0][$clog2(W)-1:0] x_h;
-    logic [LANES-1:0][$clog2(H)-1:0] y_l;
-    logic [LANES-1:0][$clog2(H)-1:0] y_h;
 
-    logic [LANES-1:0][FP-1:0] x_weight;
-    logic [LANES-1:0][FP-1:0] y_weight;
+    // Variables para calculo de interpolacion
+    logic [LANES-1:0][$clog2(WIDTH)-1:0] x_l;
+    logic [LANES-1:0][$clog2(WIDTH)-1:0] x_h;
+    logic [LANES-1:0][$clog2(WIDTH)-1:0] y_l;
+    logic [LANES-1:0][$clog2(WIDTH)-1:0] y_h;
+
+    logic [LANES-1:0][7:0] x_weight;
+    logic [LANES-1:0][7:0] y_weight;
 
     genvar lane;
+
+    // Calculo de variables de interpolacion en lanes
     generate
-        for (lane = 0; lane < LANES; lane++) begin : GEN_COORDS
-            logic [$clog2(NEW_W)-1:0] j_lane;
-            always_comb j_lane = j_base + lane;
-
-            logic [RFP_WIDTH + $clog2(NEW_W) - 1 : 0] tmp_xfp;
-            assign tmp_xfp = j_lane * x_ratio_fp;
-            assign x_fp[lane] = tmp_xfp[RFP_WIDTH-1:0];
-
-            logic [RFP_WIDTH + $clog2(NEW_H) - 1 : 0] tmp_yfp;
-            assign tmp_yfp = i_cnt * y_ratio_fp;
-            assign y_fp[lane] = tmp_yfp[RFP_WIDTH-1:0];
-
-            assign x_l[lane] = x_fp[lane][RFP_WIDTH-1:FP];
-            assign y_l[lane] = y_fp[lane][RFP_WIDTH-1:FP];
-
+        for (lane = 0; lane < LANES; lane++) begin: coordinates
+            logic [$clog2(OUT_W)-1:0] j_lane;
             always_comb begin
-                if (x_l[lane] == W-1) x_h[lane] = x_l[lane];
-                else                  x_h[lane] = x_l[lane] + 1;
-                if (y_l[lane] == H-1) y_h[lane] = y_l[lane];
-                else                  y_h[lane] = y_l[lane] + 1;
+                j_lane = j + lane; 
             end
 
-            assign x_weight[lane] = x_fp[lane][FP-1:0];
-            assign y_weight[lane] = y_fp[lane][FP-1:0];
+            logic [16 + $clog2(OUT_W) - 1:0] temp_x;
+            assign temp_x = j_lane * x_ratio;
+            assign x[lane] = temp_x[15:0];
+
+            logic [16 + $clog2(OUT_H) - 1:0] temp_y;
+            assign temp_y = i * y_ratio;
+            assign y[lane] = temp_y[15:0];
+
+            assign x_l[lane] = x[lane][15:8];
+            assign y_l[lane] = y[lane][15:8];
+
+            always_comb begin
+                if (x_l[lane] == WIDTH - 1) begin
+                    x_h[lane] = x_l[lane];
+                end
+                else begin
+                    x_h[lane] = x_l[lane] + 1;
+                end
+                if (y_l[lane] == HEIGHT - 1) begin
+                    y_h[lane] = y_l[lane];
+                end
+                else begin
+                    y_h[lane] = y_l[lane] + 1;
+                end
+            end
+
+            assign x_weight[lane] = x[lane][7:0];
+            assign y_weight[lane] = y[lane][7:0];
         end
     endgenerate
 
-    logic [LANES-1:0][7:0] a;
-    logic [LANES-1:0][7:0] b;
-    logic [LANES-1:0][7:0] c;
-    logic [LANES-1:0][7:0] d;
+    logic [LANES-1:0][7:0] a_lane;
+    logic [LANES-1:0][7:0] b_lane;
+    logic [LANES-1:0][7:0] c_lane;
+    logic [LANES-1:0][7:0] d_lane;
 
+    // Distribucion de pixeles de imagen a lanes de pixeles a,b,c,d
     generate
-        for (lane = 0; lane < LANES; lane++) begin : GEN_MEM_READ
-            logic [$clog2((W+LANES-1)/LANES)-1:0] addr_xl, addr_xh;
+        for (lane = 0; lane < LANES; lane++) begin : read_mem
+            logic [$clog2((WIDTH + LANES - 1)) / LANES - 1:0] addr_xl, addr_xh;
 
             assign addr_xl = x_l[lane] / LANES;
             assign addr_xh = x_h[lane] / LANES;
 
             always_comb begin
-                a[lane] = bank_mem[lane][y_l[lane]][addr_xl];
-                b[lane] = bank_mem[lane][y_l[lane]][addr_xh];
-                c[lane] = bank_mem[lane][y_h[lane]][addr_xl];
-                d[lane] = bank_mem[lane][y_h[lane]][addr_xh];
+                a_lane[lane] = bank_mem[lane][y_l[lane]][addr_xl];
+                b_lane[lane] = bank_mem[lane][y_l[lane]][addr_xh];
+                c_lane[lane] = bank_mem[lane][y_h[lane]][addr_xl];
+                d_lane[lane] = bank_mem[lane][y_h[lane]][addr_xh];
             end
         end
     endgenerate
 
-    localparam int ACCW = 8 + 2*FP + 8;
-    logic [LANES-1:0][ACCW-1:0] term_a;
-    logic [LANES-1:0][ACCW-1:0] term_b;
-    logic [LANES-1:0][ACCW-1:0] term_c;
-    logic [LANES-1:0][ACCW-1:0] term_d;
-    logic [LANES-1:0][ACCW+4:0] sum_fp;
+    // 16 bits de Q8.8
+    localparam int ACCW = 32;
 
+    logic [LANES-1:0][ACCW-1:0] a;
+    logic [LANES-1:0][ACCW-1:0] b;
+    logic [LANES-1:0][ACCW-1:0] c;
+    logic [LANES-1:0][ACCW-1:0] d;
+    logic [LANES-1:0][ACCW+4:0] sum;
+
+    // Calculo final de pesos de interpolacion con punto fijo contemplado
     generate
-        for (lane = 0; lane < LANES; lane++) begin : GEN_MATH
-            logic [FP-1:0] one_minus_xw, one_minus_yw;
-            assign one_minus_xw = ({FP{1'b1}}) - x_weight[lane];
-            assign one_minus_yw = ({FP{1'b1}}) - y_weight[lane];
+        for (lane = 0; lane < LANES; lane++) begin : interpolation
+            logic [7:0] one_minus_x, one_minus_y;
+            assign one_minus_x = (({8{1'b1}}) - x_weight[lane]);
+            assign one_minus_y = (({8{1'b1}}) - y_weight[lane]);
 
             always_comb begin
-                term_a[lane] = (a[lane] * one_minus_xw * one_minus_yw);
-                term_b[lane] = (b[lane] * x_weight[lane] * one_minus_yw);
-                term_c[lane] = (c[lane] * one_minus_xw * y_weight[lane]);
-                term_d[lane] = (d[lane] * x_weight[lane] * y_weight[lane]);
+                a[lane] = (a_lane[lane] * one_minus_x * one_minus_y);
+                b[lane] = (b_lane[lane] * x_weight[lane] * one_minus_y);
+                c[lane] = (c_lane[lane] * one_minus_x * y_weight[lane]);
+                d[lane] = (d_lane[lane] * x_weight[lane] * y_weight[lane]);
 
-                sum_fp[lane] = term_a[lane] + term_b[lane] + term_c[lane] + term_d[lane];
+                sum[lane] = a[lane] + b[lane] + c[lane] + d[lane];
             end
 
             always_comb begin
-                pixel_out[lane] = sum_fp[lane][2*FP + 7 : 2*FP];
+                pixel_out[lane] = sum[lane][23:16];
             end
         end
     endgenerate
-
-    assign valid = 1'b1;
 
 endmodule
