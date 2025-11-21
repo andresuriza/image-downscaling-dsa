@@ -1,7 +1,7 @@
-module downscaling #(
+module downscaling_serial #(
     parameter IMG_W = 8,
     parameter IMG_H = 8,
-	 parameter ratio = 1,
+	parameter ratio = 1,
     parameter int OUT_W = ratio * IMG_W,
     parameter int OUT_H = ratio * IMG_H,
     parameter Q = 8,
@@ -13,7 +13,7 @@ module downscaling #(
     output logic done
 );
 
-    logic [7:0] img_in  [0:IMG_H-1][0:IMG_W-1];
+    logic [7:0] img_in [0:IMG_H-1][0:IMG_W-1];
     logic [7:0] img_out [0:OUT_H-1][0:OUT_W-1];
 
     logic [OUT_W-1:0] out_x;
@@ -22,7 +22,6 @@ module downscaling #(
     localparam logic [15:0] ONE_Q = 16'(1 << Q);
 
 	 // Variables de interpolacion por pesos
-	 
     logic [15:0] one_fx, one_fy;
     logic [31:0] w00, w10, w01, w11;
 
@@ -35,8 +34,8 @@ module downscaling #(
             out_x <= '0;
             out_y <= '0;
             done  <= 1'b0;
-        end else if (!done) begin
-
+        end 
+        else if (!done) begin
             logic [31:0] src_x_q, src_y_q;
             int x_l, x_h, y_l, y_h;
             logic [15:0] fx_q, fy_q;
@@ -49,10 +48,17 @@ module downscaling #(
             x_l = src_x_q >>> Q;
             y_l = src_y_q >>> Q;
 
-            if (x_l < 0)         x_l = 0;
-            if (y_l < 0)         y_l = 0;
-            if (x_l > IMG_W-1)   x_l = IMG_W-1;
-            if (y_l > IMG_H-1)   y_l = IMG_H-1;
+            if (x_l < 0)         
+                x_l = 0;
+
+            if (y_l < 0)         
+                y_l = 0;
+
+            if (x_l > IMG_W-1)   
+                x_l = IMG_W-1;
+
+            if (y_l > IMG_H-1)   
+                y_l = IMG_H-1;
 
             x_h = (x_l == IMG_W-1) ? IMG_W-1 : x_l + 1;
             y_h = (y_l == IMG_H-1) ? IMG_H-1 : y_l + 1;
@@ -94,10 +100,12 @@ module downscaling #(
                 out_x <= '0;
                 if (out_y == OUT_H-1) begin
                     done <= 1'b1;
-                end else begin
+                end 
+                else begin
                     out_y <= out_y + 1;
                 end
-            end else begin
+            end 
+            else begin
                 out_x <= out_x + 1;
             end
         end

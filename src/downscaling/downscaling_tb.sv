@@ -4,7 +4,7 @@ module downscaling_tb;
 
     localparam int IMG_W = 4;
     localparam int IMG_H = 4;
-	 localparam ratio = 0.5;
+	localparam ratio = 0.5;
     localparam int local_out_w = IMG_W * ratio;
     localparam int local_out_h = IMG_H * ratio;
 
@@ -12,13 +12,13 @@ module downscaling_tb;
     logic rst_n;
     logic done;
 	 
-	 integer i, j;
+	integer i, j;
 
     // Instancia del módulo
-    downscaling #(
+    downscaling_serial #(
         .IMG_W(IMG_W),
         .IMG_H(IMG_H),
-		  .ratio(ratio)
+		.ratio(ratio)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
