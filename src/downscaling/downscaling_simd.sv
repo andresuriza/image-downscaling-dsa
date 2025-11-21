@@ -1,5 +1,3 @@
-// TODO: Cambiar a arreglos empaquetados
-
 module downscaling_simd #(
     parameter int W = 512,
     parameter int H = 512,
@@ -40,16 +38,16 @@ module downscaling_simd #(
         end
     end
 
-    logic [RFP_WIDTH-1:0] x_fp   [LANES-1:0];
-    logic [RFP_WIDTH-1:0] y_fp   [LANES-1:0];
+    logic [LANES-1:0][RFP_WIDTH-1:0] x_fp;
+    logic [LANES-1:0][RFP_WIDTH-1:0] y_fp;
 
-    logic [$clog2(W)-1:0] x_l     [LANES-1:0];
-    logic [$clog2(W)-1:0] x_h     [LANES-1:0];
-    logic [$clog2(H)-1:0] y_l     [LANES-1:0];
-    logic [$clog2(H)-1:0] y_h     [LANES-1:0];
+    logic [LANES-1:0][$clog2(W)-1:0] x_l;
+    logic [LANES-1:0][$clog2(W)-1:0] x_h;
+    logic [LANES-1:0][$clog2(H)-1:0] y_l;
+    logic [LANES-1:0][$clog2(H)-1:0] y_h;
 
-    logic [FP-1:0] x_weight     [LANES-1:0];
-    logic [FP-1:0] y_weight     [LANES-1:0];
+    logic [LANES-1:0][FP-1:0] x_weight;
+    logic [LANES-1:0][FP-1:0] y_weight;
 
     genvar lane;
     generate
@@ -80,7 +78,10 @@ module downscaling_simd #(
         end
     endgenerate
 
-    logic [7:0] a [LANES-1:0], b [LANES-1:0], c [LANES-1:0], d [LANES-1:0];
+    logic [LANES-1:0][7:0] a;
+    logic [LANES-1:0][7:0] b;
+    logic [LANES-1:0][7:0] c;
+    logic [LANES-1:0][7:0] d;
 
     generate
         for (lane = 0; lane < LANES; lane++) begin : GEN_MEM_READ
@@ -99,8 +100,11 @@ module downscaling_simd #(
     endgenerate
 
     localparam int ACCW = 8 + 2*FP + 8;
-    logic [ACCW-1:0] term_a [LANES-1:0], term_b [LANES-1:0], term_c [LANES-1:0], term_d [LANES-1:0];
-    logic [ACCW+4:0] sum_fp [LANES-1:0];
+    logic [LANES-1:0][ACCW-1:0] term_a;
+    logic [LANES-1:0][ACCW-1:0] term_b;
+    logic [LANES-1:0][ACCW-1:0] term_c;
+    logic [LANES-1:0][ACCW-1:0] term_d;
+    logic [LANES-1:0][ACCW+4:0] sum_fp;
 
     generate
         for (lane = 0; lane < LANES; lane++) begin : GEN_MATH
