@@ -40,8 +40,15 @@ image = np.array([[0, 64, 128, 192],
 
 scale = 0.5
 
+print("Array 2D original: ")
+print(image)
+
+result = downscale(image, scale)
+print("Resultante con escala: ")
+print(result)
+
 # Calculo de downscaling y exportacion de imagenes
-out_image = Image.fromarray(downscale(image, scale).astype(np.uint8))
+out_image = Image.fromarray(result.astype(np.uint8))
 image = Image.fromarray(image.astype(np.uint8))
 image.save('test-images/in.jpg')
 out_image.save('test-images/out.jpg')
