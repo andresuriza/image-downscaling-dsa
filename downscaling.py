@@ -44,7 +44,7 @@ print("Array 2D original: ")
 print(image)
 
 result = downscale(image, scale)
-print("Resultante con escala: ")
+print(f"Resultante con escala {scale}:")
 print(result)
 
 # Calculo de downscaling y exportacion de imagenes
