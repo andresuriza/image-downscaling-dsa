@@ -1,8 +1,11 @@
 import math
 import numpy as np
+from PIL import Image
 
-def downscale(image, new_h, new_w):
+# Realiza el downscaling mediante interpolacion bilineal de un array 2D de numpy
+def downscale(image, scale):
     img_height, img_width = image.shape[:2] # Unicamente ancho y altura
+    new_h, new_w = round(img_height * scale), round(img_width * scale)
 
     resized = np.empty([new_h, new_w])
 
@@ -25,6 +28,20 @@ def downscale(image, new_h, new_w):
 
             pixel = a * (1 - x_weight) * (1 - y_weight) + b * x_weight * (1 - y_weight) + c * y_weight * (1 - x_weight) + d * x_weight * y_weight
 
-            resized[i][j] = pixel
+            resized[i][j] = round(pixel)
 
     return resized
+
+# Imagen a probar
+image = np.array([[0, 64, 128, 192],
+         [32, 96, 160, 224],
+         [64, 128, 192, 255],
+         [96, 160, 224, 255]])
+
+scale = 0.5
+
+# Calculo de downscaling y exportacion de imagenes
+out_image = Image.fromarray(downscale(image, scale).astype(np.uint8))
+image = Image.fromarray(image.astype(np.uint8))
+image.save('test-images/in.jpg')
+out_image.save('test-images/out.jpg')
