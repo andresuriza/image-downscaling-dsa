@@ -67,3 +67,5 @@ ehthumbs.db
 .vscode/
 .idea/
 *.swp
+
+test-images/
