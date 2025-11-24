@@ -1,7 +1,3 @@
-// simd_downscaler.sv
-// Parameterized SIMD bilinear compute core (Q8.8). Assumes per-lane neighbor pixels are supplied.
-// Produces one vector of LANES output pixels per cycle.
-
 module simd_downscaler #(
     parameter int LANES = 8,                 // SIMD width (must be > 4 by your constraint)
     parameter int Q = 8                       // fractional bits (Q8.8)
