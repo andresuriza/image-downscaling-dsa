@@ -45,6 +45,7 @@ qdb/
 *.gz
 *.rar
 *.7z
+*.exe
 
 # Platform Designer (Qsys) generated files
 ip/
