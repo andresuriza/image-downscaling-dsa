@@ -70,3 +70,4 @@ ehthumbs.db
 *.swp
 
 test-images/
+venv/
