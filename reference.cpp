@@ -104,20 +104,55 @@ void save_png(
     stbi_write_png(filename, W, H, 1, buffer.data(), W);
 }
 
+
 int main() {
-    // Imagen 4x4 de ejemplo
-    std::vector<std::vector<uint8_t>> img = {
-        { 0,  64, 128, 192},
-        {32,  96, 160, 224},
-        {64, 128, 192, 255},
-        {96, 160, 224, 255}
-    };
+    std::vector<std::vector<uint8_t>> img_4x4;
+    std::vector<std::vector<uint8_t>> img_8x8;
+    std::vector<std::vector<uint8_t>> img_16x16;
+
+    
+    img_4x4.resize(4);
+
+    for (int y = 0; y < 4; y++) {
+        img_4x4[y].resize(4);
+    }
+
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            img_4x4[y][x] = ((x * 64 + y * 32) & 0xFF);
+        }
+    }
+
+    img_8x8.resize(8);
+
+    for (int y = 0; y < 8; y++) {
+        img_8x8[y].resize(8);
+    }
+
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            img_8x8[y][x] = ((x * 64 + y * 32) & 0xFF);
+        }
+    }
+
+    img_16x16.resize(16);
+
+    for (int y = 0; y < 16; y++) {
+        img_16x16[y].resize(16);
+    }
+
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++) {
+            img_16x16[y][x] = ((x * 64 + y * 32) & 0xFF);
+        }
+    }
+
 
     float scale = 0.5f;
 
-    auto out = downscale_q88(img, scale);
+    auto out = downscale_q88(img_4x4, scale);
 
-    save_png(img,  "test-images/in.png");
+    save_png(img_4x4,  "test-images/in.png");
     save_png(out,  "test-images/out.png");
 
     std::cout << "Imagen reducida (" << out.size() << "x" << out[0].size() << "):\n";
@@ -125,6 +160,26 @@ int main() {
         for (auto v : row) std::cout << (int)v << " ";
         std::cout << "\n";
     }
+    
+
+    out = downscale_q88(img_8x8, scale);
+    save_png(img_8x8,  "test-images/in.png");
+    save_png(out,  "test-images/out.png");
+    std::cout << "Imagen reducida (" << out.size() << "x" << out[0].size() << "):\n";
+    for (auto& row : out) {
+        for (auto v : row) std::cout << (int)v << " ";
+        std::cout << "\n";
+    }
+
+    out = downscale_q88(img_16x16, scale);
+    save_png(img_16x16,  "test-images/in.png");
+    save_png(out,  "test-images/out.png");
+    std::cout << "Imagen reducida (" << out.size() << "x" << out[0].size() << "):\n";
+    for (auto& row : out) {
+        for (auto v : row) std::cout << (int)v << " ";
+        std::cout << "\n";
+    }
+
 
     return 0;
 }
