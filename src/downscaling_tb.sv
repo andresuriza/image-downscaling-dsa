@@ -1,3 +1,5 @@
+// Exclude testbench from synthesis — only for simulation
+// synopsys translate_off
 module downscaling_tb;
     localparam LANES = 8;
     localparam Q = 8;
@@ -24,8 +26,8 @@ module downscaling_tb;
     logic out_valid;
 
     // Usar vectores lógicos de 8 bits (sin signo) para imagenes
-    logic [7:0] img_in [0:511][0:511];
-    logic [7:0] img_out [0:511][0:511];
+    (* syn_ramstyle = "block_ram" *) logic [7:0] img_in [0:511][0:511];
+    (* syn_ramstyle = "block_ram" *) logic [7:0] img_out [0:511][0:511];
 
     simd_downscaler #(.LANES(LANES), .Q(Q)) dut (
         .clk(clk), .rst_n(rst),
@@ -60,23 +62,30 @@ module downscaling_tb;
         end
     endtask
 
+    // Compute integer coordinates and Q8 fractional parts using fixed-point scale
+    // scale_fp is a Q8 fixed-point value (scale * 256)
     function automatic void compute_coords(
         input int x, y,
-        input real scale,
+        input int scale_fp,
         output int x0, x1, y0, y1,
         output logic [7:0] fx, fy
     );
-        real scaled_x = x * scale;
-        real scaled_y = y * scale;
+        int scaled_x_fp, scaled_y_fp;
 
-        x0 = int'($floor(scaled_x));
-        y0 = int'($floor(scaled_y));
+        // fixed-point multiplication: result is Q8 (value * 256)
+        scaled_x_fp = x * scale_fp; // Q8
+        scaled_y_fp = y * scale_fp; // Q8
+
+        // integer coords are the top bits (divide by 256)
+        x0 = scaled_x_fp >>> 8;
+        y0 = scaled_y_fp >>> 8;
         x1 = (x0 + 1 < width) ? x0 + 1 : x0;
         // Usar altura para límite vertical
         y1 = (y0 + 1 < height) ? y0 + 1 : y0;
 
-        fx = $rtoi((scaled_x - x0) * 255.0);
-        fy = $rtoi((scaled_y - y0) * 255.0);
+        // fractional parts are the low 8 bits (Q0.8 fixed-point)
+        fx = scaled_x_fp[7:0];
+        fy = scaled_y_fp[7:0];
 
     endfunction
 	 
@@ -91,7 +100,7 @@ module downscaling_tb;
 
             if (ox < out_w) begin
                 // Usar factor de escala basado en (in_dim-1)/(out_dim-1) para mapear extremos
-                compute_coords(ox, oy, scale_r,
+                compute_coords(ox, oy, scale_q8_8,
                                x0,x1,y0,y1,fx,fy);
 
                 p00[8*lane +:8] = img_in[y0][x0];
@@ -146,8 +155,6 @@ module downscaling_tb;
             $write("\n");
         end
     endtask
-	 
-    real scale_r;
 
     // Test individual con parámetros específicos
     task run_test(input int in_w, in_h, out_w_val, out_h_val);
@@ -166,12 +173,11 @@ module downscaling_tb;
 
         load_image(width, height);
 
-        // Factor de escala correcto
+        // Compute fixed-point Q8 scale: (width-1)/(out_w-1) * 256
         if (out_w > 1)
-            scale_r = real'(width - 1) / real'(out_w - 1);
+            scale_q8_8 = int'(((width - 1) * 256) / (out_w - 1));
         else
-            scale_r = 0.0;
-        scale_q8_8 = int'(scale_r * 256.0);
+            scale_q8_8 = 0;
 
         @(posedge clk);
         start = 1;
@@ -182,7 +188,7 @@ module downscaling_tb;
         total_out_pixels = out_w_val * out_h_val;
         num_cycles = (total_out_pixels + LANES - 1) / LANES;
 
-        // Drive inputs for all output pixels across multiple cycles if needed
+        // Drive inputs for all output pixels across múltiples ciclos si es necesario
         out_count = 0;
         for (int cycle = 0; cycle < num_cycles; cycle++) begin
             for (int lane = 0; lane < LANES; lane++) begin
@@ -193,7 +199,7 @@ module downscaling_tb;
                 automatic logic [7:0] fx, fy;
 
                 if (ox < out_w_val && oy < out_h_val) begin
-                    compute_coords(ox, oy, scale_r, x0, x1, y0, y1, fx, fy);
+                    compute_coords(ox, oy, scale_q8_8, x0, x1, y0, y1, fx, fy);
 
                     p00[8*lane +:8] = img_in[y0][x0];
                     p01[8*lane +:8] = img_in[y0][x1];
@@ -248,3 +254,5 @@ module downscaling_tb;
     end
 
 endmodule
+
+// synopsys translate_on

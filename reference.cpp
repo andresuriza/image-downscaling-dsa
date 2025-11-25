@@ -106,80 +106,51 @@ void save_png(
 
 
 int main() {
-    std::vector<std::vector<uint8_t>> img_4x4;
-    std::vector<std::vector<uint8_t>> img_8x8;
-    std::vector<std::vector<uint8_t>> img_16x16;
-
-    
-    img_4x4.resize(4);
-
-    for (int y = 0; y < 4; y++) {
-        img_4x4[y].resize(4);
-    }
-
-    for (int y = 0; y < 4; y++) {
-        for (int x = 0; x < 4; x++) {
-            img_4x4[y][x] = ((x * 64 + y * 32) & 0xFF);
+    auto make_image = [&](int W, int H){
+        std::vector<std::vector<uint8_t>> img(H, std::vector<uint8_t>(W));
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                img[y][x] = static_cast<uint8_t>((x * 64 + y * 32) & 0xFF);
+            }
         }
-    }
+        return img;
+    };
 
-    img_8x8.resize(8);
-
-    for (int y = 0; y < 8; y++) {
-        img_8x8[y].resize(8);
-    }
-
-    for (int y = 0; y < 8; y++) {
-        for (int x = 0; x < 8; x++) {
-            img_8x8[y][x] = ((x * 64 + y * 32) & 0xFF);
+    auto print_image = [&](const std::vector<std::vector<uint8_t>>& im){
+        int H = im.size();
+        int W = im[0].size();
+        for (int y = 0; y < H; y++){
+            for (int x = 0; x < W; x++) std::cout << (int)im[y][x] << " ";
+            std::cout << "\n";
         }
-    }
+    };
 
-    img_16x16.resize(16);
+    struct Test { int in_w, in_h, out_w, out_h; };
 
-    for (int y = 0; y < 16; y++) {
-        img_16x16[y].resize(16);
-    }
+    std::vector<Test> tests = {
+        {4, 4, 2, 2},
+        {8, 8, 4, 4},
+        {16, 16, 8, 8},
+        {8, 8, 2, 2},
+        {6, 6, 3, 3}
+    };
 
-    for (int y = 0; y < 16; y++) {
-        for (int x = 0; x < 16; x++) {
-            img_16x16[y][x] = ((x * 64 + y * 32) & 0xFF);
-        }
-    }
+    for (auto t : tests) {
+        auto img = make_image(t.in_w, t.in_h);
+        float scale = 1.0f;
+        if (t.in_w > 0) scale = static_cast<float>(t.out_w) / static_cast<float>(t.in_w);
 
+        auto out = downscale_q88(img, scale);
 
-    float scale = 0.5f;
+        std::string in_name = "test-images/in_" + std::to_string(t.in_w) + "x" + std::to_string(t.in_h) + ".png";
+        std::string out_name = "test-images/out_" + std::to_string(t.in_w) + "x" + std::to_string(t.in_h) + "_to_" + std::to_string(t.out_w) + "x" + std::to_string(t.out_h) + ".png";
 
-    auto out = downscale_q88(img_4x4, scale);
+        save_png(img, in_name.c_str());
+        save_png(out, out_name.c_str());
 
-    save_png(img_4x4,  "test-images/in.png");
-    save_png(out,  "test-images/out.png");
-
-    std::cout << "Imagen reducida (" << out.size() << "x" << out[0].size() << "):\n";
-    for (auto& row : out) {
-        for (auto v : row) std::cout << (int)v << " ";
-        std::cout << "\n";
+        std::cout << "\n=== TEST: " << t.in_w << "x" << t.in_h << " -> " << t.out_w << "x" << t.out_h << " (scale=" << scale << ") ===\n";
+        print_image(out);
     }
     
-
-    out = downscale_q88(img_8x8, scale);
-    save_png(img_8x8,  "test-images/in.png");
-    save_png(out,  "test-images/out.png");
-    std::cout << "Imagen reducida (" << out.size() << "x" << out[0].size() << "):\n";
-    for (auto& row : out) {
-        for (auto v : row) std::cout << (int)v << " ";
-        std::cout << "\n";
-    }
-
-    out = downscale_q88(img_16x16, scale);
-    save_png(img_16x16,  "test-images/in.png");
-    save_png(out,  "test-images/out.png");
-    std::cout << "Imagen reducida (" << out.size() << "x" << out[0].size() << "):\n";
-    for (auto& row : out) {
-        for (auto v : row) std::cout << (int)v << " ";
-        std::cout << "\n";
-    }
-
-
     return 0;
 }
