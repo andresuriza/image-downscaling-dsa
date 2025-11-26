@@ -12,7 +12,6 @@
 *.sdc.bak
 
 # Generated output files
-output_files/
 db/
 incremental_db/
 simulation/
@@ -49,7 +48,6 @@ qdb/
 
 # Platform Designer (Qsys) generated files
 ip/
-synthesis/
 hdl/
 altera_generated/
 altera_ip/
