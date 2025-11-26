@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system name="$${FILENAME}">
+ <component
+   name="$${FILENAME}"
+   displayName="$${FILENAME}"
+   version="1.0"
+   description=""
+   tags=""
+   categories="System" />
+ <parameter name="bonusData"><![CDATA[bonusData 
+{
+   element clk_0
+   {
+      datum _sortIndex
+      {
+         value = "0";
+         type = "int";
+      }
+   }
+   element master_0
+   {
+      datum _sortIndex
+      {
+         value = "3";
+         type = "int";
+      }
+   }
+   element merlin_master_translator_0
+   {
+      datum _sortIndex
+      {
+         value = "4";
+         type = "int";
+      }
+   }
+   element new_sdram_controller_0
+   {
+      datum _sortIndex
+      {
+         value = "2";
+         type = "int";
+      }
+   }
+   element sdram_clk_clk
+   {
+      datum _sortIndex
+      {
+         value = "1";
+         type = "int";
+      }
+   }
+}
+]]></parameter>
+ <parameter name="clockCrossingAdapter" value="HANDSHAKE" />
+ <parameter name="device" value="5CSEMA5F31C6" />
+ <parameter name="deviceFamily" value="Cyclone V" />
+ <parameter name="deviceSpeedGrade" value="6" />
+ <parameter name="fabricMode" value="QSYS" />
+ <parameter name="generateLegacySim" value="false" />
+ <parameter name="generationId" value="0" />
+ <parameter name="globalResetBus" value="false" />
+ <parameter name="hdlLanguage" value="VERILOG" />
+ <parameter name="hideFromIPCatalog" value="false" />
+ <parameter name="lockedInterfaceDefinition" value="" />
+ <parameter name="maxAdditionalLatency" value="1" />
+ <parameter name="projectName" value="proyecto2-arqui.qpf" />
+ <parameter name="sopcBorderPoints" value="false" />
+ <parameter name="systemHash" value="0" />
+ <parameter name="testBenchDutName" value="" />
+ <parameter name="timeStamp" value="0" />
+ <parameter name="useTestBenchNamingPattern" value="false" />
+ <instanceScript></instanceScript>
+ <interface name="clk" internal="clk_0.clk_in" type="clock" dir="end" />
+ <interface name="clk_0" internal="sdram_clk_clk.clk_in" type="clock" dir="end" />
+ <interface
+   name="fpga_logic_master"
+   internal="merlin_master_translator_0.avalon_universal_master_0"
+   type="avalon"
+   dir="start" />
+ <interface name="reset" internal="clk_0.clk_in_reset" type="reset" dir="end" />
+ <interface
+   name="reset_0"
+   internal="sdram_clk_clk.clk_in_reset"
+   type="reset"
+   dir="end" />
+ <interface
+   name="sdram_wire_addr"
+   internal="new_sdram_controller_0.wire"
+   type="conduit"
+   dir="end" />
+ <module name="clk_0" kind="clock_source" version="20.1" enabled="1">
+  <parameter name="clockFrequency" value="50000000" />
+  <parameter name="clockFrequencyKnown" value="true" />
+  <parameter name="inputClockFrequency" value="0" />
+  <parameter name="resetSynchronousEdges" value="NONE" />
+ </module>
+ <module
+   name="master_0"
+   kind="altera_jtag_avalon_master"
+   version="20.1"
+   enabled="1">
+  <parameter name="AUTO_DEVICE" value="5CSEMA5F31C6" />
+  <parameter name="AUTO_DEVICE_FAMILY" value="Cyclone V" />
+  <parameter name="AUTO_DEVICE_SPEEDGRADE" value="6" />
+  <parameter name="COMPONENT_CLOCK" value="0" />
+  <parameter name="FAST_VER" value="0" />
+  <parameter name="FIFO_DEPTHS" value="2" />
+  <parameter name="PLI_PORT" value="50000" />
+  <parameter name="USE_PLI" value="0" />
+ </module>
+ <module
+   name="merlin_master_translator_0"
+   kind="altera_merlin_master_translator"
+   version="20.1"
+   enabled="1">
+  <parameter name="AV_ADDRESSGROUP" value="0" />
+  <parameter name="AV_ADDRESS_SYMBOLS" value="0" />
+  <parameter name="AV_ADDRESS_W" value="32" />
+  <parameter name="AV_ALWAYSBURSTMAXBURST" value="0" />
+  <parameter name="AV_BITS_PER_SYMBOL" value="8" />
+  <parameter name="AV_BURSTBOUNDARIES" value="0" />
+  <parameter name="AV_BURSTCOUNT_SYMBOLS" value="0" />
+  <parameter name="AV_BURSTCOUNT_W" value="4" />
+  <parameter name="AV_BYTEENABLE_W" value="4" />
+  <parameter name="AV_CONSTANT_BURST_BEHAVIOR" value="0" />
+  <parameter name="AV_DATA_HOLD" value="0" />
+  <parameter name="AV_DATA_W" value="32" />
+  <parameter name="AV_INTERLEAVEBURSTS" value="0" />
+  <parameter name="AV_ISBIGENDIAN" value="0" />
+  <parameter name="AV_LINEWRAPBURSTS" value="0" />
+  <parameter name="AV_MAX_PENDING_READ_TRANSACTIONS" value="64" />
+  <parameter name="AV_READLATENCY" value="0" />
+  <parameter name="AV_READ_WAIT" value="0" />
+  <parameter name="AV_REGISTERINCOMINGSIGNALS" value="0" />
+  <parameter name="AV_REGISTEROUTGOINGSIGNALS" value="0" />
+  <parameter name="AV_SETUP_WAIT" value="0" />
+  <parameter name="AV_SYMBOLS_PER_WORD" value="4" />
+  <parameter name="AV_WRITE_WAIT" value="0" />
+  <parameter name="SYNC_RESET" value="0" />
+  <parameter name="UAV_ADDRESSGROUP" value="0" />
+  <parameter name="UAV_ADDRESS_W" value="38" />
+  <parameter name="UAV_BURSTCOUNT_W" value="10" />
+  <parameter name="UAV_CONSTANT_BURST_BEHAVIOR" value="0" />
+  <parameter name="USE_ADDRESS" value="1" />
+  <parameter name="USE_BEGINBURSTTRANSFER" value="0" />
+  <parameter name="USE_BEGINTRANSFER" value="0" />
+  <parameter name="USE_BURSTCOUNT" value="1" />
+  <parameter name="USE_BYTEENABLE" value="1" />
+  <parameter name="USE_CHIPSELECT" value="0" />
+  <parameter name="USE_CLKEN" value="0" />
+  <parameter name="USE_DEBUGACCESS" value="0" />
+  <parameter name="USE_LOCK" value="0" />
+  <parameter name="USE_READ" value="1" />
+  <parameter name="USE_READDATA" value="1" />
+  <parameter name="USE_READDATAVALID" value="1" />
+  <parameter name="USE_READRESPONSE" value="0" />
+  <parameter name="USE_WAITREQUEST" value="1" />
+  <parameter name="USE_WRITE" value="1" />
+  <parameter name="USE_WRITEDATA" value="1" />
+  <parameter name="USE_WRITERESPONSE" value="0" />
+ </module>
+ <module
+   name="new_sdram_controller_0"
+   kind="altera_avalon_new_sdram_controller"
+   version="20.1"
+   enabled="1">
+  <parameter name="TAC" value="5.5" />
+  <parameter name="TMRD" value="3" />
+  <parameter name="TRCD" value="20.0" />
+  <parameter name="TRFC" value="70.0" />
+  <parameter name="TRP" value="20.0" />
+  <parameter name="TWR" value="14.0" />
+  <parameter name="casLatency" value="3" />
+  <parameter name="clockRate" value="50000000" />
+  <parameter name="columnWidth" value="8" />
+  <parameter name="componentName">$${FILENAME}_new_sdram_controller_0</parameter>
+  <parameter name="dataWidth" value="32" />
+  <parameter name="generateSimulationModel" value="false" />
+  <parameter name="initNOPDelay" value="0.0" />
+  <parameter name="initRefreshCommands" value="2" />
+  <parameter name="masteredTristateBridgeSlave" value="0" />
+  <parameter name="model">single_Micron_MT48LC4M32B2_7_chip</parameter>
+  <parameter name="numberOfBanks" value="4" />
+  <parameter name="numberOfChipSelects" value="1" />
+  <parameter name="pinsSharedViaTriState" value="false" />
+  <parameter name="powerUpDelay" value="100.0" />
+  <parameter name="refreshPeriod" value="15.625" />
+  <parameter name="registerDataIn" value="true" />
+  <parameter name="rowWidth" value="12" />
+ </module>
+ <module name="sdram_clk_clk" kind="clock_source" version="20.1" enabled="1">
+  <parameter name="clockFrequency" value="50000000" />
+  <parameter name="clockFrequencyKnown" value="true" />
+  <parameter name="inputClockFrequency" value="0" />
+  <parameter name="resetSynchronousEdges" value="NONE" />
+ </module>
+ <connection
+   kind="avalon"
+   version="20.1"
+   start="master_0.master"
+   end="new_sdram_controller_0.s1">
+  <parameter name="arbitrationPriority" value="1" />
+  <parameter name="baseAddress" value="0x0000" />
+  <parameter name="defaultConnection" value="false" />
+ </connection>
+ <connection
+   kind="clock"
+   version="20.1"
+   start="sdram_clk_clk.clk"
+   end="new_sdram_controller_0.clk" />
+ <connection
+   kind="clock"
+   version="20.1"
+   start="sdram_clk_clk.clk"
+   end="master_0.clk" />
+ <connection
+   kind="clock"
+   version="20.1"
+   start="sdram_clk_clk.clk"
+   end="merlin_master_translator_0.clk" />
+ <connection
+   kind="reset"
+   version="20.1"
+   start="sdram_clk_clk.clk_reset"
+   end="master_0.clk_reset" />
+ <connection
+   kind="reset"
+   version="20.1"
+   start="sdram_clk_clk.clk_reset"
+   end="merlin_master_translator_0.reset" />
+ <connection
+   kind="reset"
+   version="20.1"
+   start="sdram_clk_clk.clk_reset"
+   end="new_sdram_controller_0.reset" />
+ <interconnectRequirement for="$system" name="qsys_mm.clockCrossingAdapter" value="HANDSHAKE" />
+ <interconnectRequirement for="$system" name="qsys_mm.enableEccProtection" value="FALSE" />
+ <interconnectRequirement for="$system" name="qsys_mm.insertDefaultSlave" value="FALSE" />
+ <interconnectRequirement for="$system" name="qsys_mm.maxAdditionalLatency" value="1" />
+</system>
