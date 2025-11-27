@@ -11,8 +11,8 @@ module de1_soc_top (
     output logic        DRAM_CKE,
     output logic        DRAM_CLK,
     output logic        DRAM_CS_N,
-    inout  logic [31:0] DRAM_DQ,
-    output logic [3:0]  DRAM_DQM,
+    inout  logic [15:0] DRAM_DQ,
+    output logic [1:0]  DRAM_DQM,
     output logic        DRAM_RAS_N,
     output logic        DRAM_WE_N
 );
@@ -57,7 +57,7 @@ module de1_soc_top (
         .fpga_logic_master_lock              (1'b0),
         .fpga_logic_master_debugaccess       (1'b0)
     );
-
+	 
     // Wires to connect soc_system to our custom logic
     logic [31:0] avs_address;
     logic [3:0]  avs_burstcount;

@@ -1,6 +1,7 @@
 
 module mi_sdram (
 	clk_clk,
+	clk_0_clk,
 	fpga_logic_master_address,
 	fpga_logic_master_burstcount,
 	fpga_logic_master_read,
@@ -14,7 +15,6 @@ module mi_sdram (
 	fpga_logic_master_debugaccess,
 	reset_reset_n,
 	reset_0_reset_n,
-	clk_0_clk,
 	sdram_wire_addr_addr,
 	sdram_wire_addr_ba,
 	sdram_wire_addr_cas_n,
@@ -26,6 +26,7 @@ module mi_sdram (
 	sdram_wire_addr_we_n);	
 
 	input		clk_clk;
+	input		clk_0_clk;
 	output	[37:0]	fpga_logic_master_address;
 	output	[9:0]	fpga_logic_master_burstcount;
 	output		fpga_logic_master_read;
@@ -39,14 +40,13 @@ module mi_sdram (
 	output		fpga_logic_master_debugaccess;
 	input		reset_reset_n;
 	input		reset_0_reset_n;
-	input		clk_0_clk;
 	output	[11:0]	sdram_wire_addr_addr;
 	output	[1:0]	sdram_wire_addr_ba;
 	output		sdram_wire_addr_cas_n;
 	output		sdram_wire_addr_cke;
 	output		sdram_wire_addr_cs_n;
-	inout	[31:0]	sdram_wire_addr_dq;
-	output	[3:0]	sdram_wire_addr_dqm;
+	inout	[15:0]	sdram_wire_addr_dq;
+	output	[1:0]	sdram_wire_addr_dqm;
 	output		sdram_wire_addr_ras_n;
 	output		sdram_wire_addr_we_n;
 endmodule

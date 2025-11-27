@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <EnsembleReport name="mi_sdram" kind="mi_sdram" version="1.0" fabric="QSYS">
  <!-- Format version 20.1 711 (Future versions may contain additional information.) -->
- <!-- 2025.11.26.15:39:05 -->
+ <!-- 2025.11.26.20:18:37 -->
  <!-- A collection of modules and connections -->
  <parameter name="AUTO_GENERATION_ID">
   <type>java.lang.Integer</type>
-  <value>1764193145</value>
+  <value>1764209917</value>
   <derived>false</derived>
   <enabled>true</enabled>
   <visible>false</visible>
@@ -954,7 +954,7 @@ parameters are a RESULT of the module parameters. -->
     <slaveName>s1</slaveName>
     <name>new_sdram_controller_0.s1</name>
     <baseAddress>0</baseAddress>
-    <span>16777216</span>
+    <span>8388608</span>
    </memoryBlock>
   </interface>
   <interface name="master_reset" kind="reset_source" version="20.1">
@@ -2256,7 +2256,7 @@ the requested settings for a module instance. -->
   </assignment>
   <assignment>
    <name>embeddedsw.CMacro.SDRAM_DATA_WIDTH</name>
-   <value>32</value>
+   <value>16</value>
   </assignment>
   <assignment>
    <name>embeddedsw.CMacro.SDRAM_NUM_BANKS</name>
@@ -2320,7 +2320,7 @@ the requested settings for a module instance. -->
   </assignment>
   <assignment>
    <name>embeddedsw.memoryInfo.MEM_INIT_DATA_WIDTH</name>
-   <value>32</value>
+   <value>16</value>
   </assignment>
   <parameter name="TAC">
    <type>double</type>
@@ -2380,7 +2380,7 @@ the requested settings for a module instance. -->
   </parameter>
   <parameter name="dataWidth">
    <type>int</type>
-   <value>32</value>
+   <value>16</value>
    <derived>false</derived>
    <enabled>true</enabled>
    <visible>true</visible>
@@ -2511,7 +2511,7 @@ the requested settings for a module instance. -->
   </parameter>
   <parameter name="size">
    <type>long</type>
-   <value>16777216</value>
+   <value>8388608</value>
    <derived>true</derived>
    <enabled>true</enabled>
    <visible>false</visible>
@@ -2693,7 +2693,7 @@ parameters are a RESULT of the module parameters. -->
    </parameter>
    <parameter name="addressSpan">
     <type>java.math.BigInteger</type>
-    <value>16777216</value>
+    <value>8388608</value>
     <derived>true</derived>
     <enabled>true</enabled>
     <visible>false</visible>
@@ -2998,7 +2998,7 @@ parameters are a RESULT of the module parameters. -->
    <port>
     <name>az_be_n</name>
     <direction>Input</direction>
-    <width>4</width>
+    <width>2</width>
     <role>byteenable_n</role>
    </port>
    <port>
@@ -3010,7 +3010,7 @@ parameters are a RESULT of the module parameters. -->
    <port>
     <name>az_data</name>
     <direction>Input</direction>
-    <width>32</width>
+    <width>16</width>
     <role>writedata</role>
    </port>
    <port>
@@ -3028,7 +3028,7 @@ parameters are a RESULT of the module parameters. -->
    <port>
     <name>za_data</name>
     <direction>Output</direction>
-    <width>32</width>
+    <width>16</width>
     <role>readdata</role>
    </port>
    <port>
@@ -3115,13 +3115,13 @@ parameters are a RESULT of the module parameters. -->
    <port>
     <name>zs_dq</name>
     <direction>Bidir</direction>
-    <width>32</width>
+    <width>16</width>
     <role>export</role>
    </port>
    <port>
     <name>zs_dqm</name>
     <direction>Output</direction>
-    <width>4</width>
+    <width>2</width>
     <role>export</role>
    </port>
    <port>

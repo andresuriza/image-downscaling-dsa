@@ -167,8 +167,8 @@ https://fpgasoftware.intel.com/eula.
 	(port
 		(pt 0 328)
 		(output)
-		(text "sdram_wire_addr_dqm[3..0]" (rect 0 0 114 12)(font "Arial" (font_size 8)))
-		(text "sdram_wire_addr_dqm[3..0]" (rect 4 317 154 328)(font "Arial" (font_size 8)))
+		(text "sdram_wire_addr_dqm[1..0]" (rect 0 0 113 12)(font "Arial" (font_size 8)))
+		(text "sdram_wire_addr_dqm[1..0]" (rect 4 317 154 328)(font "Arial" (font_size 8)))
 		(line (pt 0 328)(pt 160 328)(line_width 3))
 	)
 	(port
@@ -188,8 +188,8 @@ https://fpgasoftware.intel.com/eula.
 	(port
 		(pt 0 312)
 		(bidir)
-		(text "sdram_wire_addr_dq[31..0]" (rect 0 0 109 12)(font "Arial" (font_size 8)))
-		(text "sdram_wire_addr_dq[31..0]" (rect 4 301 154 312)(font "Arial" (font_size 8)))
+		(text "sdram_wire_addr_dq[15..0]" (rect 0 0 109 12)(font "Arial" (font_size 8)))
+		(text "sdram_wire_addr_dq[15..0]" (rect 4 301 154 312)(font "Arial" (font_size 8)))
 		(line (pt 0 312)(pt 160 312)(line_width 3))
 	)
 	(drawing
@@ -223,7 +223,7 @@ https://fpgasoftware.intel.com/eula.
 		(text "dqm" (rect 165 323 348 656)(font "Arial" (color 0 0 0)))
 		(text "ras_n" (rect 165 339 360 688)(font "Arial" (color 0 0 0)))
 		(text "we_n" (rect 165 355 354 720)(font "Arial" (color 0 0 0)))
-		(text " mi_sdram " (rect 418 376 896 762)(font "Arial" ))
+		(text " system " (rect 429 376 906 762)(font "Arial" ))
 		(line (pt 160 32)(pt 272 32)(line_width 1))
 		(line (pt 272 32)(pt 272 376)(line_width 1))
 		(line (pt 160 376)(pt 272 376)(line_width 1))

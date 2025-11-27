@@ -24,8 +24,8 @@ module mi_sdram (
 		output wire        sdram_wire_addr_cas_n,           //                  .cas_n
 		output wire        sdram_wire_addr_cke,             //                  .cke
 		output wire        sdram_wire_addr_cs_n,            //                  .cs_n
-		inout  wire [31:0] sdram_wire_addr_dq,              //                  .dq
-		output wire [3:0]  sdram_wire_addr_dqm,             //                  .dqm
+		inout  wire [15:0] sdram_wire_addr_dq,              //                  .dq
+		output wire [1:0]  sdram_wire_addr_dqm,             //                  .dqm
 		output wire        sdram_wire_addr_ras_n,           //                  .ras_n
 		output wire        sdram_wire_addr_we_n             //                  .we_n
 	);
@@ -39,14 +39,14 @@ module mi_sdram (
 	wire         master_0_master_write;                                     // master_0:master_write -> mm_interconnect_0:master_0_master_write
 	wire  [31:0] master_0_master_writedata;                                 // master_0:master_writedata -> mm_interconnect_0:master_0_master_writedata
 	wire         mm_interconnect_0_new_sdram_controller_0_s1_chipselect;    // mm_interconnect_0:new_sdram_controller_0_s1_chipselect -> new_sdram_controller_0:az_cs
-	wire  [31:0] mm_interconnect_0_new_sdram_controller_0_s1_readdata;      // new_sdram_controller_0:za_data -> mm_interconnect_0:new_sdram_controller_0_s1_readdata
+	wire  [15:0] mm_interconnect_0_new_sdram_controller_0_s1_readdata;      // new_sdram_controller_0:za_data -> mm_interconnect_0:new_sdram_controller_0_s1_readdata
 	wire         mm_interconnect_0_new_sdram_controller_0_s1_waitrequest;   // new_sdram_controller_0:za_waitrequest -> mm_interconnect_0:new_sdram_controller_0_s1_waitrequest
 	wire  [21:0] mm_interconnect_0_new_sdram_controller_0_s1_address;       // mm_interconnect_0:new_sdram_controller_0_s1_address -> new_sdram_controller_0:az_addr
 	wire         mm_interconnect_0_new_sdram_controller_0_s1_read;          // mm_interconnect_0:new_sdram_controller_0_s1_read -> new_sdram_controller_0:az_rd_n
-	wire   [3:0] mm_interconnect_0_new_sdram_controller_0_s1_byteenable;    // mm_interconnect_0:new_sdram_controller_0_s1_byteenable -> new_sdram_controller_0:az_be_n
+	wire   [1:0] mm_interconnect_0_new_sdram_controller_0_s1_byteenable;    // mm_interconnect_0:new_sdram_controller_0_s1_byteenable -> new_sdram_controller_0:az_be_n
 	wire         mm_interconnect_0_new_sdram_controller_0_s1_readdatavalid; // new_sdram_controller_0:za_valid -> mm_interconnect_0:new_sdram_controller_0_s1_readdatavalid
 	wire         mm_interconnect_0_new_sdram_controller_0_s1_write;         // mm_interconnect_0:new_sdram_controller_0_s1_write -> new_sdram_controller_0:az_wr_n
-	wire  [31:0] mm_interconnect_0_new_sdram_controller_0_s1_writedata;     // mm_interconnect_0:new_sdram_controller_0_s1_writedata -> new_sdram_controller_0:az_data
+	wire  [15:0] mm_interconnect_0_new_sdram_controller_0_s1_writedata;     // mm_interconnect_0:new_sdram_controller_0_s1_writedata -> new_sdram_controller_0:az_data
 	wire         rst_controller_reset_out_reset;                            // rst_controller:reset_out -> [merlin_master_translator_0:reset, mm_interconnect_0:master_0_clk_reset_reset_bridge_in_reset_reset, mm_interconnect_0:new_sdram_controller_0_reset_reset_bridge_in_reset_reset, new_sdram_controller_0:reset_n]
 
 	mi_sdram_master_0 #(

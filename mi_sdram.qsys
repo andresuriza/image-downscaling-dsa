@@ -174,7 +174,7 @@
   <parameter name="clockRate" value="50000000" />
   <parameter name="columnWidth" value="8" />
   <parameter name="componentName">$${FILENAME}_new_sdram_controller_0</parameter>
-  <parameter name="dataWidth" value="32" />
+  <parameter name="dataWidth" value="16" />
   <parameter name="generateSimulationModel" value="false" />
   <parameter name="initNOPDelay" value="0.0" />
   <parameter name="initRefreshCommands" value="2" />

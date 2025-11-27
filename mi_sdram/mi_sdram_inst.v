@@ -1,5 +1,6 @@
 	mi_sdram u0 (
 		.clk_clk                         (<connected-to-clk_clk>),                         //               clk.clk
+		.clk_0_clk                       (<connected-to-clk_0_clk>),                       //             clk_0.clk
 		.fpga_logic_master_address       (<connected-to-fpga_logic_master_address>),       // fpga_logic_master.address
 		.fpga_logic_master_burstcount    (<connected-to-fpga_logic_master_burstcount>),    //                  .burstcount
 		.fpga_logic_master_read          (<connected-to-fpga_logic_master_read>),          //                  .read
@@ -13,7 +14,6 @@
 		.fpga_logic_master_debugaccess   (<connected-to-fpga_logic_master_debugaccess>),   //                  .debugaccess
 		.reset_reset_n                   (<connected-to-reset_reset_n>),                   //             reset.reset_n
 		.reset_0_reset_n                 (<connected-to-reset_0_reset_n>),                 //           reset_0.reset_n
-		.clk_0_clk                       (<connected-to-clk_0_clk>),                       //             clk_0.clk
 		.sdram_wire_addr_addr            (<connected-to-sdram_wire_addr_addr>),            //   sdram_wire_addr.addr
 		.sdram_wire_addr_ba              (<connected-to-sdram_wire_addr_ba>),              //                  .ba
 		.sdram_wire_addr_cas_n           (<connected-to-sdram_wire_addr_cas_n>),           //                  .cas_n
