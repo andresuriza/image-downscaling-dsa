@@ -11,8 +11,15 @@
 *.sopcinfo.bak
 *.sdc.bak
 
+mi_sdram/*
+!mi_sdram/synthesis/
+mi_sdram/synthesis/*
+!mi_sdram/synthesis/mi_sdram.qip
+
+
+
+
 # Generated output files
-output_files/
 db/
 incremental_db/
 simulation/
@@ -21,7 +28,6 @@ temp/
 qdb/
 .qsys_edit/
 .qsys_sim/
-*.sof
 *.pof
 *.jic
 *.rbf
@@ -49,7 +55,6 @@ qdb/
 
 # Platform Designer (Qsys) generated files
 ip/
-synthesis/
 hdl/
 altera_generated/
 altera_ip/
@@ -61,6 +66,9 @@ altera_ip/
 *.tmp
 *~
 
+output_files/*
+!output_files/proyecto2-arqui.sof
+
 # Operating system and editor specific files
 .DS_Store
 Thumbs.db
@@ -71,3 +79,7 @@ ehthumbs.db
 
 test-images/
 venv/
+
+reference
+
+*.sopcinfo
