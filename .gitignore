@@ -11,10 +11,13 @@
 *.sopcinfo.bak
 *.sdc.bak
 
-mi_sdram/
+mi_sdram/*
+!mi_sdram/synthesis/
+mi_sdram/synthesis/*
 !mi_sdram/synthesis/mi_sdram.qip
-output_files/
-!output/proyecto2-arqui.sof
+
+
+
 
 # Generated output files
 db/
@@ -25,7 +28,6 @@ temp/
 qdb/
 .qsys_edit/
 .qsys_sim/
-*.sof
 *.pof
 *.jic
 *.rbf
@@ -63,6 +65,9 @@ altera_ip/
 *.dat
 *.tmp
 *~
+
+output_files/*
+!output_files/proyecto2-arqui.sof
 
 # Operating system and editor specific files
 .DS_Store
