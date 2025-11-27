@@ -11,6 +11,11 @@
 *.sopcinfo.bak
 *.sdc.bak
 
+mi_sdram/
+!mi_sdram.qip
+output_files/
+!proyecto2-arqui.sof
+
 # Generated output files
 db/
 incremental_db/
@@ -69,3 +74,7 @@ ehthumbs.db
 
 test-images/
 venv/
+
+reference
+
+*.sopcinfo
