@@ -25,7 +25,33 @@ module DE1_SOC(
 	output		          		DRAM_WE_N
 );
 
+//=======================================================
+//  Platform Designer System Instance
+//=======================================================
 
+wire [1:0] sdram_dqm;
+
+assign {DRAM_UDQM, DRAM_LDQM} = sdram_dqm;
+
+qsys_system u_qsys (
+    // Clock input
+    .clk_clk            (CLOCK_50),
+    .reset_reset_n      (1'b1),           // Active-low reset
+    
+    // Exported SDRAM clock (PLL outclk1, phase-shifted for SDRAM timing)
+    .sdram_clk_clk      (DRAM_CLK),
+    
+    // SDRAM wire interface
+    .sdram_addr         (DRAM_ADDR),      // [12:0]
+    .sdram_ba           (DRAM_BA),        // [1:0]
+    .sdram_cas_n        (DRAM_CAS_N),
+    .sdram_cke          (DRAM_CKE),
+    .sdram_cs_n         (DRAM_CS_N),
+    .sdram_dq           (DRAM_DQ),        // [15:0] inout
+    .sdram_dqm          (sdram_dqm),      // [1:0]
+    .sdram_ras_n        (DRAM_RAS_N),
+    .sdram_we_n         (DRAM_WE_N)
+);
 
 //=======================================================
 //  REG/WIRE declarations
