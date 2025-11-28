@@ -1,6 +1,8 @@
 # Quartus project files to ignore
 *.bak
 *.rpt
+*.smsg
+*.summary
 *.srf
 *.sta
 *.tdf
@@ -10,6 +12,10 @@
 *.qsys.bak
 *.sopcinfo.bak
 *.sdc.bak
+*.pin
+*.done
+*.jdi
+*.cdf
 
 # Generated output files
 output_files/
@@ -46,8 +52,10 @@ qdb/
 *.rar
 *.7z
 *.exe
+c5_pin_model_dump.txt
 
 # Platform Designer (Qsys) generated files
+qsys_system/
 ip/
 synthesis/
 hdl/
