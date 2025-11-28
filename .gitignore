@@ -77,5 +77,14 @@ ehthumbs.db
 .idea/
 *.swp
 
+# C/C++ compiled files
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+
 test-images/
 venv/
