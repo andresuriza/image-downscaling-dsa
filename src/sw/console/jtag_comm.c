@@ -354,45 +354,98 @@ int jtag_write_32(jtag_ctx_t *ctx, uint32_t addr, uint32_t value) {
     return send_command(ctx, cmd, response, sizeof(response));
 }
 
+/* Maximum bytes per READMEM command - limit to keep response buffer manageable */
+#define READ_CHUNK_SIZE 256
+
 int jtag_read_block(jtag_ctx_t *ctx, uint32_t addr, uint8_t *data, size_t len) {
     if (!ctx || !data) return JTAG_ERR_NOT_OPEN;
 
     char cmd[64];
-    char response[65536];  /* Large buffer for block reads */
+    char response[READ_CHUNK_SIZE * 5 + 256];  /* Buffer for hex bytes + overhead */
+    size_t offset = 0;
     
-    snprintf(cmd, sizeof(cmd), "READMEM 0x%08X %zu\n", addr, len);
+    while (offset < len) {
+        size_t chunk = (len - offset > READ_CHUNK_SIZE) ? READ_CHUNK_SIZE : (len - offset);
+        
+        snprintf(cmd, sizeof(cmd), "READMEM 0x%08X %zu\n", addr + (uint32_t)offset, chunk);
+        
+        int ret = send_command(ctx, cmd, response, sizeof(response));
+        if (ret != JTAG_OK) return ret;
+        
+        /* Parse space-separated hex bytes */
+        char *tok = strtok(response, " \t\n\r");
+        size_t i = 0;
+        while (tok && i < chunk) {
+            data[offset + i] = (uint8_t)strtoul(tok, NULL, 0);
+            i++;
+            tok = strtok(NULL, " \t\n\r");
+        }
+        
+        if (i < chunk) {
+            /* Didn't get all expected bytes */
+            return JTAG_ERR_READ;
+        }
+        
+        offset += chunk;
+        
+        /* Progress indicator for large transfers */
+        if (len > 1024 && (offset % 4096) == 0) {
+            printf("\r  Progress: %zu / %zu bytes (%.1f%%)", offset, len, 100.0 * offset / len);
+            fflush(stdout);
+        }
+    }
     
-    int ret = send_command(ctx, cmd, response, sizeof(response));
-    if (ret != JTAG_OK) return ret;
-    
-    /* Parse space-separated hex bytes */
-    char *tok = strtok(response, " \t\n\r");
-    size_t i = 0;
-    while (tok && i < len) {
-        data[i++] = (uint8_t)strtoul(tok, NULL, 0);
-        tok = strtok(NULL, " \t\n\r");
+    if (len > 1024) {
+        printf("\r  Progress: %zu / %zu bytes (100.0%%)\n", len, len);
     }
 
     return JTAG_OK;
 }
 
+/* Maximum bytes per WRITEMEM command - keep it reasonable for TCL parsing */
+#define WRITE_CHUNK_SIZE 256
+
 int jtag_write_block(jtag_ctx_t *ctx, uint32_t addr, const uint8_t *data, size_t len) {
     if (!ctx || !data) return JTAG_ERR_NOT_OPEN;
 
-    /* Build command with hex bytes */
-    char *cmd = malloc(len * 5 + 64);
-    if (!cmd) return JTAG_ERR_WRITE;
-    
     char response[256];
-    int pos = sprintf(cmd, "WRITEMEM 0x%08X", addr);
+    size_t offset = 0;
     
-    for (size_t i = 0; i < len; i++) {
-        pos += sprintf(cmd + pos, " 0x%02X", data[i]);
+    /* Process in chunks */
+    while (offset < len) {
+        size_t chunk = (len - offset > WRITE_CHUNK_SIZE) ? WRITE_CHUNK_SIZE : (len - offset);
+        
+        /* Build command: WRITEMEM addr byte0 byte1 ... */
+        char *cmd = malloc(chunk * 5 + 64);
+        if (!cmd) return JTAG_ERR_WRITE;
+        
+        int pos = sprintf(cmd, "WRITEMEM 0x%08X", addr + (uint32_t)offset);
+        
+        for (size_t i = 0; i < chunk; i++) {
+            pos += sprintf(cmd + pos, " 0x%02X", data[offset + i]);
+        }
+        strcat(cmd, "\n");
+        
+        int ret = send_command(ctx, cmd, response, sizeof(response));
+        free(cmd);
+        
+        if (ret != JTAG_OK) {
+            return ret;
+        }
+        
+        offset += chunk;
+        
+        /* Progress indicator for large transfers */
+        if (len > 1024 && (offset % 4096) == 0) {
+            printf("\r  Progress: %zu / %zu bytes (%.1f%%)", offset, len, 100.0 * offset / len);
+            fflush(stdout);
+        }
     }
-    strcat(cmd, "\n");
     
-    int ret = send_command(ctx, cmd, response, sizeof(response));
-    free(cmd);
+    if (len > 1024) {
+        printf("\r  Progress: %zu / %zu bytes (100.0%%)\n", len, len);
+    }
     
-    return ret;
+    return JTAG_OK;
 }
+
