@@ -27,6 +27,7 @@
 
 #include "dsa_registers.h"
 #include "jtag_comm.h"
+#include "validation/bilinear_reference.h"
 
 /*===========================================================================
  * Console State
@@ -308,7 +309,8 @@ static void cmd_help(void) {
     printf("  load <file.pgm>      Load input image (requires connection)\n");
     printf("  dump <file.pgm>      Dump output image\n");
     printf("  testload <file.pgm>  Test PGM file loading (no JTAG needed)\n");
-    printf("  compare <file.pgm>   Compare with reference\n");
+    printf("  compare <ref.pgm>    Compare FPGA output with C reference model\n");
+    printf("                       Optionally saves reference to ref.pgm\n");
     printf("\nStatus:\n");
     printf("  show status          Show accelerator status\n");
     printf("  show config          Show configuration\n");
@@ -579,6 +581,137 @@ static void cmd_dump(const char *filename) {
     }
 }
 
+static void cmd_compare(const char *reference_file) {
+    if (!g_state.jtag.connected) {
+        printf("Error: Not connected.\n");
+        return;
+    }
+
+    if (g_state.img_width == 0 || g_state.img_height == 0) {
+        printf("Error: Image dimensions not set. Load an image first.\n");
+        return;
+    }
+
+    if (!g_state.input_image) {
+        printf("Error: No input image loaded. Use 'load <file>' first.\n");
+        return;
+    }
+
+    /* Calculate output dimensions */
+    uint32_t out_w = (uint32_t)(g_state.img_width * g_state.scale);
+    uint32_t out_h = (uint32_t)(g_state.img_height * g_state.scale);
+    size_t out_size = out_w * out_h;
+
+    /* Download FPGA output from SDRAM */
+    uint8_t *fpga_output = (uint8_t*)malloc(out_size);
+    if (!fpga_output) {
+        printf("Error: Out of memory\n");
+        return;
+    }
+
+    printf("Downloading FPGA output from SDRAM at 0x%08X...\n", DEFAULT_IMG_OUT_ADDR);
+    int ret = jtag_read_block(&g_state.jtag, DEFAULT_IMG_OUT_ADDR, fpga_output, out_size);
+    if (ret != JTAG_OK) {
+        printf("Download failed: %s\n", jtag_strerror(ret));
+        free(fpga_output);
+        return;
+    }
+    printf("Download complete (%zu bytes)\n", out_size);
+
+    /* Generate reference image using C model */
+    uint8_t *reference = (uint8_t*)malloc(out_size);
+    if (!reference) {
+        printf("Error: Out of memory\n");
+        free(fpga_output);
+        return;
+    }
+
+    printf("Generating reference image using C model...\n");
+    q8_8_t scale_q8_8 = float_to_q8_8(g_state.scale);
+    
+    uint64_t flops = 0, mem_reads = 0, mem_writes = 0;
+    
+    if (g_state.mode == MODE_SIMD) {
+        downscale_bilinear_simd(
+            g_state.input_image, reference,
+            g_state.img_width, g_state.img_height,
+            out_w, out_h,
+            scale_q8_8,
+            g_state.simd_lanes,
+            &flops, &mem_reads, &mem_writes
+        );
+    } else {
+        downscale_bilinear_sequential(
+            g_state.input_image, reference,
+            g_state.img_width, g_state.img_height,
+            out_w, out_h,
+            scale_q8_8,
+            &flops, &mem_reads, &mem_writes
+        );
+    }
+
+    /* Save reference image if filename provided */
+    if (reference_file && strlen(reference_file) > 0) {
+        if (save_pgm_image(reference_file, reference, out_w, out_h) == 0) {
+            printf("Reference saved to: %s\n", reference_file);
+        }
+    }
+
+    /* Compare images */
+    uint32_t max_diff = 0, diff_count = 0, first_x = 0, first_y = 0;
+    int mismatch = compare_images(
+        reference, fpga_output,
+        out_w, out_h,
+        &max_diff, &diff_count, &first_x, &first_y
+    );
+
+    /* Print results */
+    printf("\n=== DSA Validation Results ===\n");
+    printf("Input:       %u x %u\n", g_state.img_width, g_state.img_height);
+    printf("Output:      %u x %u\n", out_w, out_h);
+    printf("Scale:       %.4f (Q8.8: 0x%04X)\n", g_state.scale, scale_q8_8);
+    printf("Mode:        %s", g_state.mode == MODE_SIMD ? "SIMD" : "Sequential");
+    if (g_state.mode == MODE_SIMD) {
+        printf(" (%d lanes)", g_state.simd_lanes);
+    }
+    printf("\n\n");
+
+    if (!mismatch) {
+        printf("Result: \033[32mPASS\033[0m - Bit-exact match!\n");
+    } else {
+        printf("Result: \033[31mFAIL\033[0m\n");
+        printf("  Differing pixels: %u / %u (%.2f%%)\n", 
+               diff_count, out_w * out_h,
+               100.0 * diff_count / (out_w * out_h));
+        printf("  Maximum difference: %u\n", max_diff);
+        printf("  First difference at: (%u, %u)\n", first_x, first_y);
+        
+        /* Show first few differing pixels */
+        printf("\nFirst differences:\n");
+        int shown = 0;
+        for (uint32_t y = 0; y < out_h && shown < 5; y++) {
+            for (uint32_t x = 0; x < out_w && shown < 5; x++) {
+                uint32_t idx = y * out_w + x;
+                if (reference[idx] != fpga_output[idx]) {
+                    printf("  [%u,%u]: ref=%u, fpga=%u, diff=%d\n",
+                           x, y, reference[idx], fpga_output[idx],
+                           (int)fpga_output[idx] - (int)reference[idx]);
+                    shown++;
+                }
+            }
+        }
+    }
+
+    /* Reference model stats */
+    printf("\nReference model stats:\n");
+    printf("  FLOPs:        %llu\n", (unsigned long long)flops);
+    printf("  Memory reads: %llu\n", (unsigned long long)mem_reads);
+    printf("  Memory writes: %llu\n", (unsigned long long)mem_writes);
+
+    free(reference);
+    free(fpga_output);
+}
+
 static void cmd_show(const char *what) {
     if (!g_state.jtag.connected) {
         printf("Error: Not connected.\n");
@@ -713,6 +846,9 @@ static void process_command(char *line) {
         } else {
             printf("Usage: dump <filename.pgm>\n");
         }
+    } else if (strcmp(cmd, "compare") == 0) {
+        /* arg1 is optional - if provided, saves reference to that file */
+        cmd_compare(arg1[0] ? arg1 : NULL);
     } else if (strcmp(cmd, "read") == 0) {
         if (arg1[0]) {
             cmd_read(arg1);
