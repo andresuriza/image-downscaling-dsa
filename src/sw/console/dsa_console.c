@@ -308,7 +308,6 @@ static void cmd_help(void) {
     printf("\nImage I/O:\n");
     printf("  load <file.pgm>      Load input image (requires connection)\n");
     printf("  dump <file.pgm>      Dump output image\n");
-    printf("  testload <file.pgm>  Test PGM file loading (no JTAG needed)\n");
     printf("  compare <ref.pgm>    Compare FPGA output with C reference model\n");
     printf("                       Optionally saves reference to ref.pgm\n");
     printf("\nStatus:\n");
@@ -465,40 +464,6 @@ static void cmd_abort(void) {
     dsa_write_csr(CSR_CTRL, CTRL_RESET);
     dsa_write_csr(CSR_CTRL, 0);
     printf("Aborted.\n");
-}
-
-/* Test command to verify PGM loading without JTAG connection */
-static void cmd_testload(const char *filename) {
-    uint32_t w, h;
-    uint8_t *data;
-    
-    if (load_pgm_image(filename, &data, &w, &h) != 0) {
-        return;
-    }
-
-    printf("Successfully parsed image: %u x %u\n", w, h);
-    printf("Total pixels: %u bytes\n", w * h);
-    
-    /* Show first few pixels */
-    printf("First 16 pixels: ");
-    size_t max_show = (w * h < 16) ? w * h : 16;
-    for (size_t i = 0; i < max_show; i++) {
-        printf("%3u ", data[i]);
-    }
-    printf("\n");
-    
-    /* Show pixel value statistics */
-    uint8_t min_val = 255, max_val = 0;
-    uint32_t sum = 0;
-    for (size_t i = 0; i < w * h; i++) {
-        if (data[i] < min_val) min_val = data[i];
-        if (data[i] > max_val) max_val = data[i];
-        sum += data[i];
-    }
-    printf("Pixel range: %u - %u, average: %.1f\n", min_val, max_val, (float)sum / (w * h));
-    
-    free(data);
-    printf("Test complete. Image file is valid.\n");
 }
 
 static void cmd_load(const char *filename) {
@@ -833,12 +798,6 @@ static void process_command(char *line) {
             cmd_load(arg1);
         } else {
             printf("Usage: load <filename.pgm>\n");
-        }
-    } else if (strcmp(cmd, "testload") == 0) {
-        if (arg1[0]) {
-            cmd_testload(arg1);
-        } else {
-            printf("Usage: testload <filename.pgm>\n");
         }
     } else if (strcmp(cmd, "dump") == 0) {
         if (arg1[0]) {
