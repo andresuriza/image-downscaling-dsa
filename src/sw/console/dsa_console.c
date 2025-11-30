@@ -306,9 +306,10 @@ static void cmd_help(void) {
     printf("  abort                Abort current operation\n");
     printf("  reset                Reset accelerator\n");
     printf("\nImage I/O:\n");
-    printf("  load <file.pgm>      Load input image (requires connection)\n");
+    printf("  load <file.pgm>      Load input image\n");
+    printf("  verify               Verify input image was written correctly to SDRAM\n");
     printf("  dump <file.pgm>      Dump output image\n");
-    printf("  compare <ref.pgm>    Compare FPGA output with C reference model\n");
+    printf("  compare [ref.pgm]    Compare FPGA output with C reference model\n");
     printf("                       Optionally saves reference to ref.pgm\n");
     printf("\nStatus:\n");
     printf("  show status          Show accelerator status\n");
@@ -506,6 +507,79 @@ static void cmd_load(const char *filename) {
         printf("Upload failed: %s\n", jtag_strerror(ret));
         free(data);
     }
+}
+
+static void cmd_verify(void) {
+    if (!g_state.jtag.connected) {
+        printf("Error: Not connected.\n");
+        return;
+    }
+
+    if (!g_state.input_image || g_state.input_size == 0) {
+        printf("Error: No input image loaded. Use 'load <file>' first.\n");
+        return;
+    }
+
+    size_t size = g_state.input_size;
+    uint8_t *readback = (uint8_t*)malloc(size);
+    if (!readback) {
+        printf("Error: Out of memory\n");
+        return;
+    }
+
+    printf("Reading back from FPGA SDRAM at 0x%08X...\n", DEFAULT_IMG_IN_ADDR);
+    int ret = jtag_read_block(&g_state.jtag, DEFAULT_IMG_IN_ADDR, readback, size);
+
+    if (ret != JTAG_OK) {
+        printf("Read failed: %s\n", jtag_strerror(ret));
+        free(readback);
+        return;
+    }
+
+    /* Compare byte by byte */
+    uint32_t mismatch_count = 0;
+    uint32_t first_mismatch_idx = 0;
+    uint8_t first_expected = 0, first_got = 0;
+
+    for (size_t i = 0; i < size; i++) {
+        if (g_state.input_image[i] != readback[i]) {
+            if (mismatch_count == 0) {
+                first_mismatch_idx = (uint32_t)i;
+                first_expected = g_state.input_image[i];
+                first_got = readback[i];
+            }
+            mismatch_count++;
+        }
+    }
+
+    printf("\n=== SDRAM Verification Results ===\n");
+    printf("Image size:    %zu bytes\n", size);
+    printf("Dimensions:    %u x %u\n", g_state.img_width, g_state.img_height);
+
+    if (mismatch_count == 0) {
+        printf("Result:        \033[32mPASS\033[0m - All bytes match!\n");
+    } else {
+        printf("Result:        \033[31mFAIL\033[0m\n");
+        printf("Mismatches:    %u / %zu (%.2f%%)\n", 
+               mismatch_count, size, 100.0 * mismatch_count / size);
+        printf("First error at byte %u: expected 0x%02X, got 0x%02X\n",
+               first_mismatch_idx, first_expected, first_got);
+        
+        /* Show first few mismatches */
+        printf("\nFirst mismatches:\n");
+        int shown = 0;
+        for (size_t i = 0; i < size && shown < 5; i++) {
+            if (g_state.input_image[i] != readback[i]) {
+                uint32_t x = (uint32_t)(i % g_state.img_width);
+                uint32_t y = (uint32_t)(i / g_state.img_width);
+                printf("  [%u,%u] (byte %zu): expected %u, got %u\n",
+                       x, y, i, g_state.input_image[i], readback[i]);
+                shown++;
+            }
+        }
+    }
+
+    free(readback);
 }
 
 static void cmd_dump(const char *filename) {
@@ -799,6 +873,8 @@ static void process_command(char *line) {
         } else {
             printf("Usage: load <filename.pgm>\n");
         }
+    } else if (strcmp(cmd, "verify") == 0) {
+        cmd_verify();
     } else if (strcmp(cmd, "dump") == 0) {
         if (arg1[0]) {
             cmd_dump(arg1);
