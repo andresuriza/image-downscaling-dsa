@@ -69,12 +69,23 @@ clean:
 run: $(CONSOLE_EXE)
 	./$(CONSOLE_EXE)
 
-# Test - generate reference images and run validation
-test: $(VALIDATE_EXE)
-	@echo "=== Generating reference image ==="
-	./$(VALIDATE_EXE) --generate test_images/gradient_8x8.pgm validation/reference_8x8.pgm -s 0.5 -v
-	@echo ""
-	@echo "=== Running validation test ==="
-	./$(VALIDATE_EXE) test_images/gradient_8x8.pgm validation/reference_8x8.pgm -s 0.5 -v
+# Clean generated images (test inputs and outputs)
+clean-images:
+	rm -f test_images/*.pgm test_results/*.pgm
 
-.PHONY: all console validate generate clean run test
+# Generate test images and run validation
+test: $(GENERATE_EXE) $(VALIDATE_EXE)
+	@mkdir -p test_images test_results
+	@echo "=== Generating test images in test_images/ ==="
+	./$(GENERATE_EXE) test_images
+	@echo ""
+	@echo "=== Running validation (results in test_results/) ==="
+	@for img in test_images/*.pgm; do \
+		base=$$(basename $$img .pgm); \
+		echo "Processing: $$base"; \
+		./$(VALIDATE_EXE) --generate "$$img" "test_results/$${base}_ref.pgm" -s 0.5 -m sequential; \
+	done
+	@echo ""
+	@echo "=== Test complete ==="
+
+.PHONY: all console validate generate clean clean-images run test
