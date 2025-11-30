@@ -284,6 +284,57 @@ static void dsa_print_perf(void) {
     }
 }
 
+static const char* fsm_state_name(uint32_t state) {
+    static const char* names[] = {
+        "IDLE", "INIT", "FETCH_ROW0", "FETCH_ROW1", 
+        "WAIT_ROWS", "COMPUTE_COORD", "PACK_PIXELS", "WAIT_PROCESS",
+        "WRITE_PIXEL", "WAIT_WRITE", "NEXT_PIXEL", "WAIT_STEP",
+        "DONE", "ERROR"
+    };
+    if (state < sizeof(names)/sizeof(names[0])) {
+        return names[state];
+    }
+    return "UNKNOWN";
+}
+
+static void dsa_print_debug(void) {
+    uint32_t state_x, y_srcx, srcy_frac, neighbors, output;
+
+    if (dsa_read_csr(CSR_DBG_STATE_X, &state_x) != JTAG_OK ||
+        dsa_read_csr(CSR_DBG_Y_SRCX, &y_srcx) != JTAG_OK ||
+        dsa_read_csr(CSR_DBG_SRCY_FRAC, &srcy_frac) != JTAG_OK ||
+        dsa_read_csr(CSR_DBG_NEIGHBORS, &neighbors) != JTAG_OK ||
+        dsa_read_csr(CSR_DBG_OUTPUT, &output) != JTAG_OK) {
+        printf("Error reading debug registers\n");
+        return;
+    }
+
+    /* Parse fields */
+    uint32_t fsm_state = (state_x >> 28) & 0xF;
+    uint32_t out_x = state_x & 0xFFFF;
+    uint32_t out_y = (y_srcx >> 16) & 0xFFFF;
+    uint32_t src_x_int = y_srcx & 0xFFFF;
+    uint32_t src_y_int = (srcy_frac >> 16) & 0xFFFF;
+    uint32_t frac_x = (srcy_frac >> 8) & 0xFF;
+    uint32_t frac_y = srcy_frac & 0xFF;
+    uint32_t p00 = (neighbors >> 24) & 0xFF;
+    uint32_t p01 = (neighbors >> 16) & 0xFF;
+    uint32_t p10 = (neighbors >> 8) & 0xFF;
+    uint32_t p11 = neighbors & 0xFF;
+    uint32_t out_pixel = (output >> 8) & 0xFF;
+    uint32_t lane_idx = output & 0xF;
+
+    printf("=== Debug/Observability (Lane %u) ===\n", lane_idx);
+    printf("FSM State:   %s (%u)\n", fsm_state_name(fsm_state), fsm_state);
+    printf("Output Coord: (%u, %u)\n", out_x, out_y);
+    printf("Source Coord: (%u, %u) + frac(%.3f, %.3f)\n", 
+           src_x_int, src_y_int, 
+           (float)frac_x / 256.0f, (float)frac_y / 256.0f);
+    printf("Neighbors:   p00=%3u  p01=%3u\n", p00, p01);
+    printf("             p10=%3u  p11=%3u\n", p10, p11);
+    printf("Output Pixel: %u\n", out_pixel);
+}
+
 /*===========================================================================
  * Command Handlers
  *===========================================================================*/
@@ -315,6 +366,7 @@ static void cmd_help(void) {
     printf("  show status          Show accelerator status\n");
     printf("  show config          Show configuration\n");
     printf("  show perf            Show performance counters\n");
+    printf("  show debug           Show debug registers (stepping)\n");
     printf("  show all             Show everything\n");
     printf("  read <addr>          Read CSR at offset (hex)\n");
     printf("  write <addr> <val>   Write CSR (hex)\n");
@@ -454,6 +506,7 @@ static void cmd_step(void) {
     dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
     printf("Stepped.\n");
     dsa_print_status();
+    dsa_print_debug();
 }
 
 static void cmd_abort(void) {
@@ -763,14 +816,18 @@ static void cmd_show(const char *what) {
         dsa_print_config();
     } else if (strcmp(what, "perf") == 0) {
         dsa_print_perf();
+    } else if (strcmp(what, "debug") == 0) {
+        dsa_print_debug();
     } else if (strcmp(what, "all") == 0) {
         dsa_print_config();
         printf("\n");
         dsa_print_status();
         printf("\n");
         dsa_print_perf();
+        printf("\n");
+        dsa_print_debug();
     } else {
-        printf("Unknown: %s (use status, config, perf, all)\n", what);
+        printf("Unknown: %s (use status, config, perf, debug, all)\n", what);
     }
 }
 

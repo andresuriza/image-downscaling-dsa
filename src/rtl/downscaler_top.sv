@@ -1,12 +1,13 @@
 //=======================================================
 // Downscaler Top Module
-// Integrates CSR bridge and SIMD accelerator
-// Uses SDRAM only for image storage
+// Integrates CSR bridge, Pixel Fetch FSM, and SIMD accelerator
+// Uses SDRAM for image storage (supports up to MAX_IMAGE_SIZE)
 //=======================================================
 
 module downscaler_top #(
     parameter int LANES = 8,
-    parameter int Q = 8
+    parameter int Q = 8,
+    parameter int MAX_IMAGE_SIZE = 2048
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -38,22 +39,14 @@ module downscaler_top #(
 );
 
     //=======================================================
-    // Internal Signals
+    // Internal Signals - CSR Bridge outputs
     //=======================================================
-    
-    // CSR Bridge to Accelerator
     logic        acc_start;
     logic        acc_reset;
     logic [31:0] acc_in_width, acc_in_height;
     logic [31:0] acc_out_width, acc_out_height;
     logic [31:0] acc_scale_q8_8;
     logic [1:0]  acc_mode;
-    logic        acc_busy;
-    logic [31:0] acc_progress;
-    logic [31:0] acc_errors;
-    logic [63:0] acc_perf_flops;
-    logic [63:0] acc_perf_mem_reads;
-    logic [63:0] acc_perf_mem_writes;
     
     // Stepping control
     logic        step_enable;
@@ -63,11 +56,46 @@ module downscaler_top #(
     logic [31:0] img_in_addr;
     logic [31:0] img_out_addr;
     
-    // Accelerator pixel interface
+    //=======================================================
+    // Internal Signals - FSM to CSR status
+    //=======================================================
+    logic        fsm_busy;
+    logic        fsm_done;
+    logic [31:0] fsm_progress;
+    logic [31:0] fsm_errors;
+    logic [63:0] fsm_perf_mem_reads;
+    logic [63:0] fsm_perf_mem_writes;
+    
+    //=======================================================
+    // Internal Signals - Debug/Observability
+    //=======================================================
+    logic [3:0]  dbg_fsm_state;
+    logic [15:0] dbg_out_x;
+    logic [15:0] dbg_out_y;
+    logic [15:0] dbg_src_x_int;
+    logic [15:0] dbg_src_y_int;
+    logic [7:0]  dbg_frac_x;
+    logic [7:0]  dbg_frac_y;
+    logic [7:0]  dbg_p00;
+    logic [7:0]  dbg_p01;
+    logic [7:0]  dbg_p10;
+    logic [7:0]  dbg_p11;
+    logic [7:0]  dbg_out_pixel;
+    logic [3:0]  dbg_lane_index;
+    
+    //=======================================================
+    // Internal Signals - FSM to SIMD interface
+    //=======================================================
     logic [LANES*8-1:0] p00_packed, p01_packed, p10_packed, p11_packed;
     logic [LANES*Q-1:0] frac_x_packed, frac_y_packed;
-    logic [LANES*8-1:0] out_pixels_packed;
-    logic               out_valid;
+    logic               pixels_valid;
+    logic [LANES*8-1:0] result_pixels;
+    logic               result_valid;
+    
+    //=======================================================
+    // SIMD Downscaler Performance Counter (FLOPs)
+    //=======================================================
+    logic [63:0] simd_perf_flops;
     
     //=======================================================
     // CSR Bridge Instance
@@ -88,7 +116,7 @@ module downscaler_top #(
         .avs_readdata     (csr_readdata),
         .avs_waitrequest  (csr_waitrequest),
         
-        // Accelerator control
+        // Accelerator control outputs
         .acc_start        (acc_start),
         .acc_reset        (acc_reset),
         .acc_in_width     (acc_in_width),
@@ -97,34 +125,128 @@ module downscaler_top #(
         .acc_out_height   (acc_out_height),
         .acc_scale_q8_8   (acc_scale_q8_8),
         .acc_mode         (acc_mode),
-        .acc_busy         (acc_busy),
-        .acc_progress     (acc_progress),
-        .acc_errors       (acc_errors),
-        .acc_perf_flops   (acc_perf_flops),
-        .acc_perf_mem_reads(acc_perf_mem_reads),
-        .acc_perf_mem_writes(acc_perf_mem_writes),
         
-        // Stepping
+        // Status inputs (from FSM)
+        .acc_busy         (fsm_busy),
+        .acc_progress     (fsm_progress),
+        .acc_errors       (fsm_errors),
+        
+        // Performance counters (FLOPs from SIMD, mem from FSM)
+        .acc_perf_flops      (simd_perf_flops),
+        .acc_perf_mem_reads  (fsm_perf_mem_reads),
+        .acc_perf_mem_writes (fsm_perf_mem_writes),
+        
+        // Stepping control
         .step_enable      (step_enable),
         .step_once        (step_once),
         
         // DMA addresses
         .img_in_addr      (img_in_addr),
-        .img_out_addr     (img_out_addr)
+        .img_out_addr     (img_out_addr),
+        
+        // Debug inputs
+        .dbg_fsm_state    (dbg_fsm_state),
+        .dbg_out_x        (dbg_out_x),
+        .dbg_out_y        (dbg_out_y),
+        .dbg_src_x_int    (dbg_src_x_int),
+        .dbg_src_y_int    (dbg_src_y_int),
+        .dbg_frac_x       (dbg_frac_x),
+        .dbg_frac_y       (dbg_frac_y),
+        .dbg_p00          (dbg_p00),
+        .dbg_p01          (dbg_p01),
+        .dbg_p10          (dbg_p10),
+        .dbg_p11          (dbg_p11),
+        .dbg_out_pixel    (dbg_out_pixel),
+        .dbg_lane_index   (dbg_lane_index)
     );
     
     //=======================================================
-    // SIMD Downscaler Instance
+    // Pixel Fetch FSM Instance
+    // Manages SDRAM reads/writes and feeds SIMD accelerator
     //=======================================================
-    simd_downscaler #(
+    pixel_fetch_fsm #(
         .LANES(LANES),
-        .Q(Q)
-    ) u_accelerator (
+        .Q(Q),
+        .MAX_WIDTH(MAX_IMAGE_SIZE),
+        .MAX_HEIGHT(MAX_IMAGE_SIZE)
+    ) u_pixel_fetch (
         .clk              (clk),
         .rst_n            (rst_n & ~acc_reset),
         
         // Control
         .start            (acc_start),
+        .abort            (acc_reset),
+        .in_width         (acc_in_width),
+        .in_height        (acc_in_height),
+        .out_width        (acc_out_width),
+        .out_height       (acc_out_height),
+        .scale_q8_8       (acc_scale_q8_8),
+        .mode             (acc_mode),
+        .img_in_addr      (img_in_addr),
+        .img_out_addr     (img_out_addr),
+        
+        // Stepping
+        .step_enable      (step_enable),
+        .step_once        (step_once),
+        
+        // Status
+        .busy             (fsm_busy),
+        .done             (fsm_done),
+        .progress         (fsm_progress),
+        .errors           (fsm_errors),
+        .perf_mem_reads   (fsm_perf_mem_reads),
+        .perf_mem_writes  (fsm_perf_mem_writes),
+        
+        // Debug outputs
+        .dbg_fsm_state    (dbg_fsm_state),
+        .dbg_out_x        (dbg_out_x),
+        .dbg_out_y        (dbg_out_y),
+        .dbg_src_x_int    (dbg_src_x_int),
+        .dbg_src_y_int    (dbg_src_y_int),
+        .dbg_frac_x       (dbg_frac_x),
+        .dbg_frac_y       (dbg_frac_y),
+        .dbg_p00          (dbg_p00),
+        .dbg_p01          (dbg_p01),
+        .dbg_p10          (dbg_p10),
+        .dbg_p11          (dbg_p11),
+        .dbg_out_pixel    (dbg_out_pixel),
+        .dbg_lane_index   (dbg_lane_index),
+        
+        // SDRAM master interface
+        .sdram_address    (sdram_address),
+        .sdram_read       (sdram_read),
+        .sdram_write      (sdram_write),
+        .sdram_writedata  (sdram_writedata),
+        .sdram_readdata   (sdram_readdata),
+        .sdram_waitrequest(sdram_waitrequest),
+        .sdram_readdatavalid(sdram_readdatavalid),
+        .sdram_byteenable (sdram_byteenable),
+        
+        // SIMD interface
+        .p00_packed       (p00_packed),
+        .p01_packed       (p01_packed),
+        .p10_packed       (p10_packed),
+        .p11_packed       (p11_packed),
+        .frac_x_packed    (frac_x_packed),
+        .frac_y_packed    (frac_y_packed),
+        .pixels_valid     (pixels_valid),
+        .result_pixels    (result_pixels),
+        .result_valid     (result_valid)
+    );
+    
+    //=======================================================
+    // SIMD Downscaler Instance
+    // Pure combinational bilinear interpolation
+    //=======================================================
+    simd_downscaler #(
+        .LANES(LANES),
+        .Q(Q)
+    ) u_simd (
+        .clk              (clk),
+        .rst_n            (rst_n & ~acc_reset),
+        
+        // Control (directly from FSM valid signal)
+        .start            (pixels_valid),
         .in_width         (acc_in_width),
         .in_height        (acc_in_height),
         .out_width        (acc_out_width),
@@ -132,17 +254,17 @@ module downscaler_top #(
         .scale_q8_8       (acc_scale_q8_8),
         .mode             (acc_mode),
         
-        // Status
-        .busy             (acc_busy),
-        .progress         (acc_progress),
-        .errors           (acc_errors),
+        // Status (used for FLOPs counting)
+        .busy             (),  // FSM manages overall busy
+        .progress         (),  // FSM tracks progress
+        .errors           (),
         
         // Performance counters
-        .perf_flops       (acc_perf_flops),
-        .perf_mem_reads   (acc_perf_mem_reads),
-        .perf_mem_writes  (acc_perf_mem_writes),
+        .perf_flops       (simd_perf_flops),
+        .perf_mem_reads   (),  // FSM tracks this
+        .perf_mem_writes  (),  // FSM tracks this
         
-        // Pixel data (directly from SDRAM via pixel fetch FSM)
+        // Pixel data from FSM
         .p00_packed       (p00_packed),
         .p01_packed       (p01_packed),
         .p10_packed       (p10_packed),
@@ -150,31 +272,9 @@ module downscaler_top #(
         .frac_x_packed    (frac_x_packed),
         .frac_y_packed    (frac_y_packed),
         
-        // Output
-        .out_pixels_packed(out_pixels_packed),
-        .out_valid        (out_valid)
+        // Output to FSM
+        .out_pixels_packed(result_pixels),
+        .out_valid        (result_valid)
     );
-    
-    //=======================================================
-    // Simple SDRAM Interface
-    // Default: idle state (JTAG master accesses SDRAM directly)
-    // TODO: Implement pixel fetch FSM when accelerator runs
-    //=======================================================
-    
-    // For now, tie off SDRAM master to allow JTAG direct access
-    // The accelerator will be extended later to fetch pixels
-    assign sdram_address = 32'd0;
-    assign sdram_read = 1'b0;
-    assign sdram_write = 1'b0;
-    assign sdram_writedata = 16'd0;
-    assign sdram_byteenable = 2'b11;
-    
-    // Temporary: tie off pixel inputs (for initial CSR testing)
-    assign p00_packed = {LANES{8'd128}};
-    assign p01_packed = {LANES{8'd128}};
-    assign p10_packed = {LANES{8'd128}};
-    assign p11_packed = {LANES{8'd128}};
-    assign frac_x_packed = {LANES{8'd0}};
-    assign frac_y_packed = {LANES{8'd0}};
 
 endmodule

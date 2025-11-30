@@ -34,6 +34,13 @@
 `define CSR_IMG_IN_ADDR    12'h080   // Input image base address in SDRAM
 `define CSR_IMG_OUT_ADDR   12'h084   // Output image base address in SDRAM
 
+// Debug/Observability Registers (read-only)
+`define CSR_DBG_STATE_X    12'h0A0   // [31:28]=fsm_state, [15:0]=out_x
+`define CSR_DBG_Y_SRCX     12'h0A4   // [31:16]=out_y, [15:0]=src_x_int
+`define CSR_DBG_SRCY_FRAC  12'h0A8   // [31:16]=src_y_int, [15:8]=frac_x, [7:0]=frac_y
+`define CSR_DBG_NEIGHBORS  12'h0AC   // [31:24]=p00, [23:16]=p01, [15:8]=p10, [7:0]=p11
+`define CSR_DBG_OUTPUT     12'h0B0   // [15:8]=out_pixel, [3:0]=lane_index
+
 // Version/ID
 `define CSR_VERSION        12'h0FC   // Version register (read-only): 0x0001_0000 = v1.0
 
@@ -89,7 +96,24 @@ module accelerator_csr_bridge #(
     // DMA Address Configuration (for SDRAM image transfer)
     //=======================================================
     output logic [31:0] img_in_addr,      // Input image SDRAM address
-    output logic [31:0] img_out_addr      // Output image SDRAM address
+    output logic [31:0] img_out_addr,     // Output image SDRAM address
+    
+    //=======================================================
+    // Debug/Observability Inputs (from pixel_fetch_fsm)
+    //=======================================================
+    input  logic [3:0]  dbg_fsm_state,
+    input  logic [15:0] dbg_out_x,
+    input  logic [15:0] dbg_out_y,
+    input  logic [15:0] dbg_src_x_int,
+    input  logic [15:0] dbg_src_y_int,
+    input  logic [7:0]  dbg_frac_x,
+    input  logic [7:0]  dbg_frac_y,
+    input  logic [7:0]  dbg_p00,
+    input  logic [7:0]  dbg_p01,
+    input  logic [7:0]  dbg_p10,
+    input  logic [7:0]  dbg_p11,
+    input  logic [7:0]  dbg_out_pixel,
+    input  logic [3:0]  dbg_lane_index
 );
 
     //=======================================================
@@ -231,6 +255,13 @@ module accelerator_csr_bridge #(
                 // DMA addresses
                 `CSR_IMG_IN_ADDR:  avs_readdata = reg_img_in_addr;
                 `CSR_IMG_OUT_ADDR: avs_readdata = reg_img_out_addr;
+                
+                // Debug/Observability registers (read-only)
+                `CSR_DBG_STATE_X:  avs_readdata = {12'd0, dbg_fsm_state, dbg_out_x};
+                `CSR_DBG_Y_SRCX:   avs_readdata = {dbg_out_y, dbg_src_x_int};
+                `CSR_DBG_SRCY_FRAC: avs_readdata = {dbg_src_y_int, dbg_frac_x, dbg_frac_y};
+                `CSR_DBG_NEIGHBORS: avs_readdata = {dbg_p00, dbg_p01, dbg_p10, dbg_p11};
+                `CSR_DBG_OUTPUT:   avs_readdata = {16'd0, dbg_out_pixel, 4'd0, dbg_lane_index};
                 
                 // Version
                 `CSR_VERSION:      avs_readdata = 32'h0001_0000; // v1.0

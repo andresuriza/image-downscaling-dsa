@@ -51,6 +51,13 @@
 #define CSR_IMG_IN_ADDR     0x080
 #define CSR_IMG_OUT_ADDR    0x084
 
+/* Debug/Observability Registers (RO) */
+#define CSR_DBG_STATE_X     0x0A0   /* [31:28]=fsm_state, [15:0]=out_x */
+#define CSR_DBG_Y_SRCX      0x0A4   /* [31:16]=out_y, [15:0]=src_x_int */
+#define CSR_DBG_SRCY_FRAC   0x0A8   /* [31:16]=src_y_int, [15:8]=frac_x, [7:0]=frac_y */
+#define CSR_DBG_NEIGHBORS   0x0AC   /* [31:24]=p00, [23:16]=p01, [15:8]=p10, [7:0]=p11 */
+#define CSR_DBG_OUTPUT      0x0B0   /* [15:8]=out_pixel, [3:0]=lane_index */
+
 /* Version */
 #define CSR_VERSION         0x0FC
 
@@ -80,7 +87,7 @@
  * Constants
  *===========================================================================*/
 #define EXPECTED_VERSION    0x00010000
-#define MAX_IMAGE_SIZE      512
+#define MAX_IMAGE_SIZE      2048
 #define MIN_SCALE_Q8_8      0x0080  /* 0.5 */
 #define MAX_SCALE_Q8_8      0x0100  /* 1.0 */
 #define DEFAULT_SIMD_LANES  8
