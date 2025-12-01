@@ -14,7 +14,6 @@ module downscaling_tb;
     logic [31:0] width, height;
     logic [31:0] out_w, out_h;
     logic [31:0] scale_q8_8;
-    logic [1:0] mode;
 
     logic busy;
     logic [31:0] progress, errors;
@@ -35,7 +34,6 @@ module downscaling_tb;
         .in_width(width), .in_height(height),
         .out_width(out_w), .out_height(out_h),
         .scale_q8_8(scale_q8_8),
-        .mode(mode),
         .busy(busy),
         .progress(progress),
         .errors(errors),

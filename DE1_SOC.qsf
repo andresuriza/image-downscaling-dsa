@@ -126,7 +126,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/accelerator_csr_bridge.sv
 set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/downscaler_top.sv
 set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/simd_downscaler.sv
 set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/downscaling_serial.sv
-set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/downscaling_tb.sv
-set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/line_buffer.sv
+# set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/downscaling_tb.sv
+# set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/line_buffer.sv
 set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/pixel_fetch_fsm.sv
+set_global_assignment -name SYSTEMVERILOG_FILE src/rtl/downscaling_tb.sv
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

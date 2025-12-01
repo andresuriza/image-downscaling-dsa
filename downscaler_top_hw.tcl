@@ -42,7 +42,9 @@ set_fileset_property QUARTUS_SYNTH ENABLE_RELATIVE_INCLUDE_PATHS false
 set_fileset_property QUARTUS_SYNTH ENABLE_FILE_OVERWRITE_MODE false
 add_fileset_file downscaler_top.sv SYSTEM_VERILOG PATH src/rtl/downscaler_top.sv TOP_LEVEL_FILE
 add_fileset_file accelerator_csr_bridge.sv SYSTEM_VERILOG PATH src/rtl/accelerator_csr_bridge.sv
-add_fileset_file simd_downscaler.sv SYSTEM_VERILOG PATH src/simd_downscaler.sv
+add_fileset_file simd_downscaler.sv SYSTEM_VERILOG PATH src/rtl/simd_downscaler.sv
+add_fileset_file pixel_fetch_fsm.sv SYSTEM_VERILOG PATH src/rtl/pixel_fetch_fsm.sv
+add_fileset_file line_buffer.sv SYSTEM_VERILOG PATH src/rtl/line_buffer.sv
 
 add_fileset SIM_VERILOG SIM_VERILOG "" ""
 set_fileset_property SIM_VERILOG TOP_LEVEL downscaler_top
@@ -50,18 +52,20 @@ set_fileset_property SIM_VERILOG ENABLE_RELATIVE_INCLUDE_PATHS false
 set_fileset_property SIM_VERILOG ENABLE_FILE_OVERWRITE_MODE false
 add_fileset_file downscaler_top.sv SYSTEM_VERILOG PATH src/rtl/downscaler_top.sv TOP_LEVEL_FILE
 add_fileset_file accelerator_csr_bridge.sv SYSTEM_VERILOG PATH src/rtl/accelerator_csr_bridge.sv
-add_fileset_file simd_downscaler.sv SYSTEM_VERILOG PATH src/simd_downscaler.sv
+add_fileset_file simd_downscaler.sv SYSTEM_VERILOG PATH src/rtl/simd_downscaler.sv
+add_fileset_file pixel_fetch_fsm.sv SYSTEM_VERILOG PATH src/rtl/pixel_fetch_fsm.sv
+add_fileset_file line_buffer.sv SYSTEM_VERILOG PATH src/rtl/line_buffer.sv
 
 
 # 
 # parameters
 # 
-add_parameter LANES INTEGER 8 "Number of SIMD lanes for parallel pixel processing"
-set_parameter_property LANES DEFAULT_VALUE 8
+add_parameter LANES INTEGER 4 "Number of SIMD lanes for parallel pixel processing"
+set_parameter_property LANES DEFAULT_VALUE 4
 set_parameter_property LANES DISPLAY_NAME "SIMD Lanes"
 set_parameter_property LANES TYPE INTEGER
 set_parameter_property LANES UNITS None
-set_parameter_property LANES ALLOWED_RANGES {4 8 16 32}
+set_parameter_property LANES ALLOWED_RANGES {2 4 8}
 set_parameter_property LANES DESCRIPTION "Number of SIMD lanes for parallel pixel processing"
 set_parameter_property LANES HDL_PARAMETER true
 add_parameter Q INTEGER 8 "Number of fractional bits for Q8.8 fixed-point format"

@@ -1,52 +1,43 @@
 //=======================================================
-// Accelerator CSR Bridge
-// Bridges between Avalon-MM CSR RAM and simd_downscaler
+// Accelerator CSR Bridge (Simplified)
+// Minimal register set for image downscaling control
 //
-// Memory Map (base address: 0x0400_0000)
+// Parameters inherited from downscaler_top
 //=======================================================
 
 //-------------------------------------------------------
 // CSR Register Offsets (32-bit aligned)
 //-------------------------------------------------------
-// Control/Status Registers
-`define CSR_CTRL           12'h000   // [0]=start, [1]=reset, [2]=step_enable, [3]=step_once
-`define CSR_STATUS         12'h004   // [0]=busy, [1]=done, [7:4]=error_code
+`define CSR_CTRL           12'h000   // [0]=start, [1]=reset
+`define CSR_STATUS         12'h004   // [0]=busy, [1]=done
 `define CSR_IN_WIDTH       12'h008   // Input image width
 `define CSR_IN_HEIGHT      12'h00C   // Input image height
 `define CSR_OUT_WIDTH      12'h010   // Output image width
 `define CSR_OUT_HEIGHT     12'h014   // Output image height
 `define CSR_SCALE_Q8_8     12'h018   // Q8.8 scale factor
-`define CSR_MODE           12'h01C   // [1:0]=mode (0=SIMD, 1=serial), [7:4]=SIMD lanes
-`define CSR_PROGRESS       12'h020   // Pixels processed (read-only)
-`define CSR_ERRORS         12'h024   // Error count (read-only)
+`define CSR_INV_SCALE      12'h01C   // Inverse scale Q16.16
+`define CSR_MODE           12'h020   // [0]=mode (0=SIMD, 1=Serial)
+`define CSR_PROGRESS       12'h024   // Pixels processed (RO)
 
-// Performance Counters (read-only, 64-bit split into LO/HI)
-`define CSR_PERF_FLOPS_LO  12'h040   // FLOP counter [31:0]
-`define CSR_PERF_FLOPS_HI  12'h044   // FLOP counter [63:32]
-`define CSR_PERF_READS_LO  12'h048   // Memory reads [31:0]
-`define CSR_PERF_READS_HI  12'h04C   // Memory reads [63:32]
-`define CSR_PERF_WRITES_LO 12'h050   // Memory writes [31:0]
-`define CSR_PERF_WRITES_HI 12'h054   // Memory writes [63:32]
+// Image Memory Pointers
+`define CSR_IMG_IN_ADDR    12'h080   // Input image SDRAM address
+`define CSR_IMG_OUT_ADDR   12'h084   // Output image SDRAM address
+
+// Performance (simplified - just cycles)
 `define CSR_PERF_CYCLES_LO 12'h058   // Cycle counter [31:0]
 `define CSR_PERF_CYCLES_HI 12'h05C   // Cycle counter [63:32]
 
-// Image Memory Pointers (for SDRAM-based operation)
-`define CSR_IMG_IN_ADDR    12'h080   // Input image base address in SDRAM
-`define CSR_IMG_OUT_ADDR   12'h084   // Output image base address in SDRAM
+// Debug registers
+`define CSR_DBG_FSM        12'h0F0   // Debug: FSM state [3:0], out_x[15:0], out_y[15:0]
+`define CSR_DBG_COORD      12'h0F4   // Debug: src_x_int[15:0], src_y_int[15:0]
+`define CSR_DBG_FRAC       12'h0F8   // Debug: frac_x[7:0], frac_y[7:0], lane[3:0]
 
-// Debug/Observability Registers (read-only)
-`define CSR_DBG_STATE_X    12'h0A0   // [31:28]=fsm_state, [15:0]=out_x
-`define CSR_DBG_Y_SRCX     12'h0A4   // [31:16]=out_y, [15:0]=src_x_int
-`define CSR_DBG_SRCY_FRAC  12'h0A8   // [31:16]=src_y_int, [15:8]=frac_x, [7:0]=frac_y
-`define CSR_DBG_NEIGHBORS  12'h0AC   // [31:24]=p00, [23:16]=p01, [15:8]=p10, [7:0]=p11
-`define CSR_DBG_OUTPUT     12'h0B0   // [15:8]=out_pixel, [3:0]=lane_index
-
-// Version/ID
-`define CSR_VERSION        12'h0FC   // Version register (read-only): 0x0001_0000 = v1.0
+// Version
+`define CSR_VERSION        12'h0FC   // Version register (RO)
 
 module accelerator_csr_bridge #(
-    parameter int LANES = 8,
-    parameter int Q = 8
+    parameter int LANES = 4,    // SIMD lanes (from top)
+    parameter int Q     = 8     // Fractional bits (from top)
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -74,6 +65,7 @@ module accelerator_csr_bridge #(
     output logic [31:0] acc_out_width,
     output logic [31:0] acc_out_height,
     output logic [31:0] acc_scale_q8_8,
+    output logic [31:0] acc_inv_scale,     // Precomputed inverse scale (Q16.16)
     output logic [1:0]  acc_mode,
     
     // Status inputs
@@ -101,19 +93,19 @@ module accelerator_csr_bridge #(
     //=======================================================
     // Debug/Observability Inputs (from pixel_fetch_fsm)
     //=======================================================
-    input  logic [3:0]  dbg_fsm_state,
-    input  logic [15:0] dbg_out_x,
-    input  logic [15:0] dbg_out_y,
-    input  logic [15:0] dbg_src_x_int,
-    input  logic [15:0] dbg_src_y_int,
-    input  logic [7:0]  dbg_frac_x,
-    input  logic [7:0]  dbg_frac_y,
-    input  logic [7:0]  dbg_p00,
-    input  logic [7:0]  dbg_p01,
-    input  logic [7:0]  dbg_p10,
-    input  logic [7:0]  dbg_p11,
-    input  logic [7:0]  dbg_out_pixel,
-    input  logic [3:0]  dbg_lane_index
+    input  logic [3:0]    dbg_fsm_state,
+    input  logic [15:0]   dbg_out_x,
+    input  logic [15:0]   dbg_out_y,
+    input  logic [15:0]   dbg_src_x_int,
+    input  logic [15:0]   dbg_src_y_int,
+    input  logic [Q-1:0]  dbg_frac_x,
+    input  logic [Q-1:0]  dbg_frac_y,
+    input  logic [7:0]    dbg_p00,      // PIXEL_WIDTH hardcoded for debug interface
+    input  logic [7:0]    dbg_p01,
+    input  logic [7:0]    dbg_p10,
+    input  logic [7:0]    dbg_p11,
+    input  logic [7:0]    dbg_out_pixel,
+    input  logic [3:0]    dbg_lane_index
 );
 
     //=======================================================
@@ -125,6 +117,7 @@ module accelerator_csr_bridge #(
     logic [31:0] reg_out_width;
     logic [31:0] reg_out_height;
     logic [31:0] reg_scale_q8_8;
+    logic [31:0] reg_inv_scale;      // Inverse scale Q16.16
     logic [31:0] reg_mode;
     logic [31:0] reg_img_in_addr;
     logic [31:0] reg_img_out_addr;
@@ -145,6 +138,7 @@ module accelerator_csr_bridge #(
     assign acc_out_width  = reg_out_width;
     assign acc_out_height = reg_out_height;
     assign acc_scale_q8_8 = reg_scale_q8_8;
+    assign acc_inv_scale  = reg_inv_scale;
     assign acc_mode       = reg_mode[1:0];
     
     assign img_in_addr   = reg_img_in_addr;
@@ -191,7 +185,8 @@ module accelerator_csr_bridge #(
             reg_out_width   <= 32'd256;   // Default output 256x256 (0.5 scale)
             reg_out_height  <= 32'd256;
             reg_scale_q8_8  <= 32'h0080;  // 0.5 in Q8.8 = 128
-            reg_mode        <= 32'd0;     // SIMD mode
+            reg_inv_scale   <= 32'h0002_0000; // inv(0.5)=2.0 in Q16.16
+            reg_mode        <= 32'd0;     // SIMD mode (0), lanes fixed at 4
             reg_img_in_addr <= 32'h0000_0000;  // SDRAM base
             reg_img_out_addr<= 32'h0010_0000;  // 1MB offset
         end else begin
@@ -213,6 +208,7 @@ module accelerator_csr_bridge #(
                     `CSR_OUT_WIDTH:   reg_out_width   <= avs_writedata;
                     `CSR_OUT_HEIGHT:  reg_out_height  <= avs_writedata;
                     `CSR_SCALE_Q8_8:  reg_scale_q8_8  <= avs_writedata;
+                    `CSR_INV_SCALE:   reg_inv_scale   <= avs_writedata;
                     `CSR_MODE:        reg_mode        <= avs_writedata;
                     `CSR_IMG_IN_ADDR: reg_img_in_addr <= avs_writedata;
                     `CSR_IMG_OUT_ADDR:reg_img_out_addr<= avs_writedata;
@@ -223,50 +219,42 @@ module accelerator_csr_bridge #(
     end
     
     //=======================================================
-    // Register Read Logic
+    // Register Read Logic (Simplified)
     //=======================================================
     always_comb begin
         avs_readdata = 32'd0;
         
         if (avs_read) begin
             case (avs_address)
-                // Control/Config registers
+                // Essential registers
                 `CSR_CTRL:         avs_readdata = reg_ctrl;
-                `CSR_STATUS:       avs_readdata = {24'd0, 4'd0, 2'd0, done_flag, acc_busy};
+                `CSR_STATUS:       avs_readdata = {30'd0, done_flag, acc_busy};
                 `CSR_IN_WIDTH:     avs_readdata = reg_in_width;
                 `CSR_IN_HEIGHT:    avs_readdata = reg_in_height;
                 `CSR_OUT_WIDTH:    avs_readdata = reg_out_width;
                 `CSR_OUT_HEIGHT:   avs_readdata = reg_out_height;
                 `CSR_SCALE_Q8_8:   avs_readdata = reg_scale_q8_8;
+                `CSR_INV_SCALE:    avs_readdata = reg_inv_scale;
                 `CSR_MODE:         avs_readdata = reg_mode;
                 `CSR_PROGRESS:     avs_readdata = acc_progress;
-                `CSR_ERRORS:       avs_readdata = acc_errors;
-                
-                // Performance counters
-                `CSR_PERF_FLOPS_LO:  avs_readdata = acc_perf_flops[31:0];
-                `CSR_PERF_FLOPS_HI:  avs_readdata = acc_perf_flops[63:32];
-                `CSR_PERF_READS_LO:  avs_readdata = acc_perf_mem_reads[31:0];
-                `CSR_PERF_READS_HI:  avs_readdata = acc_perf_mem_reads[63:32];
-                `CSR_PERF_WRITES_LO: avs_readdata = acc_perf_mem_writes[31:0];
-                `CSR_PERF_WRITES_HI: avs_readdata = acc_perf_mem_writes[63:32];
-                `CSR_PERF_CYCLES_LO: avs_readdata = cycle_counter[31:0];
-                `CSR_PERF_CYCLES_HI: avs_readdata = cycle_counter[63:32];
                 
                 // DMA addresses
                 `CSR_IMG_IN_ADDR:  avs_readdata = reg_img_in_addr;
                 `CSR_IMG_OUT_ADDR: avs_readdata = reg_img_out_addr;
                 
-                // Debug/Observability registers (read-only)
-                `CSR_DBG_STATE_X:  avs_readdata = {12'd0, dbg_fsm_state, dbg_out_x};
-                `CSR_DBG_Y_SRCX:   avs_readdata = {dbg_out_y, dbg_src_x_int};
-                `CSR_DBG_SRCY_FRAC: avs_readdata = {dbg_src_y_int, dbg_frac_x, dbg_frac_y};
-                `CSR_DBG_NEIGHBORS: avs_readdata = {dbg_p00, dbg_p01, dbg_p10, dbg_p11};
-                `CSR_DBG_OUTPUT:   avs_readdata = {16'd0, dbg_out_pixel, 4'd0, dbg_lane_index};
+                // Cycle counter only (simplified perf)
+                `CSR_PERF_CYCLES_LO: avs_readdata = cycle_counter[31:0];
+                `CSR_PERF_CYCLES_HI: avs_readdata = cycle_counter[63:32];
                 
-                // Version
-                `CSR_VERSION:      avs_readdata = 32'h0001_0000; // v1.0
+                // Version: v1.0 (simplified, lanes fixed at 4)
+                `CSR_VERSION:      avs_readdata = 32'h0001_0000;
                 
-                default:           avs_readdata = 32'hDEAD_BEEF;
+                // Debug registers (read-only)
+                `CSR_DBG_FSM:      avs_readdata = {12'd0, dbg_fsm_state, dbg_out_x};
+                `CSR_DBG_COORD:    avs_readdata = {dbg_src_y_int, dbg_src_x_int};
+                `CSR_DBG_FRAC:     avs_readdata = {12'd0, dbg_lane_index, dbg_frac_y, dbg_frac_x};
+                
+                default:           avs_readdata = 32'd0;
             endcase
         end
     end

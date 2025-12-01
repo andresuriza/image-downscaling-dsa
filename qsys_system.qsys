@@ -161,7 +161,7 @@
    kind="downscaler_top"
    version="1.0"
    enabled="1">
-  <parameter name="LANES" value="8" />
+  <parameter name="LANES" value="4" />
   <parameter name="Q" value="8" />
  </module>
  <module

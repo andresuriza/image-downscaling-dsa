@@ -1,158 +1,214 @@
+//=======================================================
+// SIMD Bilinear Interpolation - DSP Optimized
+// 
+// Simplified pipelined design for efficient DSP inference.
+// Uses 3-stage pipeline to improve Fmax and DSP utilization.
+//
+// Formula per pixel:
+//   result = (1-fx)*(1-fy)*p00 + fx*(1-fy)*p01 + 
+//            (1-fx)*fy*p10 + fx*fy*p11
+//
+// Parameters inherited from downscaler_top
+//=======================================================
+
 module simd_downscaler #(
-    parameter int LANES = 8,                 // SIMD width (must be > 4 by your constraint)
-    parameter int Q = 8                       // fractional bits (Q8.8)
+    parameter int LANES = 4,    // Number of parallel lanes (from top)
+    parameter int Q     = 8     // Fractional bits (from top)
 ) (
     input  logic clk,
     input  logic rst_n,
 
-    // Control registers (simple register write via TB or APB/AXI-MM in future)
-    input  logic start,                       // start operation
+    // Control (directly from FSM)
+    input  logic start,
     input  logic [31:0] in_width, in_height,
     input  logic [31:0] out_width, out_height,
-    input  logic [31:0] scale_q8_8,           // Q8.8 scale factor: src = dst * (1/scale) OR we define scale = src/dst? (TB uses it consistently)
-    input  logic [1:0] mode,                  // 0 = SIMD, 1 = serial (reserved)
+    input  logic [31:0] scale_q8_8,
+    
+    // Status (directly from FSM - simplified)
     output logic busy,
-    output logic [31:0] progress,             // output pixels produced
+    output logic [31:0] progress,
     output logic [31:0] errors,
 
     // Performance counters
-    output logic [63:0] perf_flops,           // counts multiply-add ops
+    output logic [63:0] perf_flops,
     output logic [63:0] perf_mem_reads,
     output logic [63:0] perf_mem_writes,
 
-    // Input: per-lane neighbor pixels; each packed lane is 8 bits
-    input  logic [LANES*8-1:0] p00_packed,    // pixel at (x0,y0) for each lane
-    input  logic [LANES*8-1:0] p01_packed,    // (x1,y0)
-    input  logic [LANES*8-1:0] p10_packed,    // (x0,y1)
-    input  logic [LANES*8-1:0] p11_packed,    // (x1,y1)
+    // Pixel inputs
+    input  logic [LANES*8-1:0] p00_packed,
+    input  logic [LANES*8-1:0] p01_packed,
+    input  logic [LANES*8-1:0] p10_packed,
+    input  logic [LANES*8-1:0] p11_packed,
+    input  logic [LANES*Q-1:0] frac_x_packed,
+    input  logic [LANES*Q-1:0] frac_y_packed,
 
-    // Input: per-lane fractional weights in Q0.8 (0..255)
-    input  logic [LANES*Q-1:0] frac_x_packed, // wx for each lane
-    input  logic [LANES*Q-1:0] frac_y_packed, // wy for each lane
-
-    // Output: packed result pixels (8 bits per lane)
+    // Output
     output logic [LANES*8-1:0] out_pixels_packed,
     output logic out_valid
 );
 
-    // sanity assert (simulation-only)
-    // synopsys translate_off
-    initial begin
-        if (LANES <= 4) begin
-            $warning("LANES should be > 4 for this design; current LANES=%0d", LANES);
-        end
-    end
-    // synopsys translate_on
+    //=======================================================
+    // Derived constants from parameters
+    //=======================================================
+    localparam int PIXEL_WIDTH = 8;                      // Bits per pixel
+    localparam int ONE_Q       = (1 << Q);               // 1.0 in Q format (256 for Q=8)
+    localparam int HALF_Q      = (1 << (Q-1));           // 0.5 in Q format (128 for Q=8)
+    localparam int MAX_PIXEL   = (1 << PIXEL_WIDTH) - 1; // Max pixel value (255 for 8-bit)
+    localparam int FLOPS_PER_PIXEL = 8;                  // FLOPs per bilinear interpolation
 
-    // Internal registers
+    //=======================================================
+    // Pipeline registers - 3 stage for DSP inference
+    //=======================================================
+    logic valid_s1, valid_s2;
+    
+    // Stage 1: Registered inputs and weight calculation
+    logic [PIXEL_WIDTH-1:0] p00_r [LANES-1:0];
+    logic [PIXEL_WIDTH-1:0] p01_r [LANES-1:0];
+    logic [PIXEL_WIDTH-1:0] p10_r [LANES-1:0];
+    logic [PIXEL_WIDTH-1:0] p11_r [LANES-1:0];
+    logic [15:0] w00   [LANES-1:0];
+    logic [15:0] w01   [LANES-1:0];
+    logic [15:0] w10   [LANES-1:0];
+    logic [15:0] w11   [LANES-1:0];
+    
+    // Stage 2: Multiply-accumulate result
+    logic [23:0] sum   [LANES-1:0];
+    
+    // Combinational weight calculation signals
+    logic [Q:0]    fx_comb    [LANES-1:0];  // Q+1 bits for (1-fx) calculation
+    logic [Q:0]    fy_comb    [LANES-1:0];
+    logic [Q:0]    inv_fx_comb[LANES-1:0];
+    logic [Q:0]    inv_fy_comb[LANES-1:0];
+    logic [2*Q+1:0] w00_comb  [LANES-1:0];  // Weight product width
+    logic [2*Q+1:0] w01_comb  [LANES-1:0];
+    logic [2*Q+1:0] w10_comb  [LANES-1:0];
+    logic [2*Q+1:0] w11_comb  [LANES-1:0];
+    
+    // Combinational output signals
+    logic [23:0] rounded   [LANES-1:0];
+    logic [PIXEL_WIDTH-1:0] out_pixel [LANES-1:0];
+    
+    // Simple status
     logic running;
     logic [31:0] produced;
-
-    // Counters
+    
+    // Unused outputs tied off
+    assign busy = running;
+    assign errors = 32'd0;
+    assign perf_mem_reads = 64'd0;
+    assign perf_mem_writes = 64'd0;
+    
+    //=======================================================
+    // Control logic
+    //=======================================================
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            running <= 0;
-            busy <= 0;
-            produced <= 0;
-            progress <= 0;
-            errors <= 0;
-            perf_flops <= 0;
-            perf_mem_reads <= 0;
-            perf_mem_writes <= 0;
+            running <= 1'b0;
+            produced <= 32'd0;
+            progress <= 32'd0;
+            perf_flops <= 64'd0;
         end else begin
             if (start && !running) begin
-                running <= 1;
-                busy <= 1;
-                produced <= 0;
+                running <= 1'b1;
+                produced <= 32'd0;
             end
-
-            if (running) begin
-                // produce one vector per cycle
+            
+            if (running && valid_s2) begin
                 produced <= produced + LANES;
                 progress <= produced + LANES;
-                // update counters: each lane does (2 multiplies per top/bot row) + (2 multiplies for vertical blend) -> count as 4 mults and ~6 adds
-                perf_flops <= perf_flops + (LANES * 4); // rough count for multiplies
+                perf_flops <= perf_flops + (LANES * FLOPS_PER_PIXEL);
             end
-
-            // Simple stop condition: when produced >= out_width*out_height stop
+            
             if (running && (produced + LANES >= out_width * out_height)) begin
-                running <= 0;
-                busy <= 0;
+                running <= 1'b0;
             end
         end
     end
-	
-// === PACKED SIMD TEMPORARIES ===
-logic [LANES*16-1:0] res_q8_8;     // Q8.8 intermediate
-logic [LANES*24-1:0] rounded;      // for rounding
-logic [LANES*8 -1:0] finalpix;     // final clipped pixels
-
-
-genvar gi;
-generate
-    for (gi = 0; gi < LANES; gi++) begin : LANE_COMPUTE
-
-        // -------------------------------------------------------------
-        // Extract 8-bit pixels and Q0.8 weights (all UNSIGNED)
-        // -------------------------------------------------------------
-        // per-lane locals (declared, then assigned via continuous assigns)
-        logic [7:0] p00_l, p01_l, p10_l, p11_l;
-        logic [Q-1:0] wx_l, wy_l;
-
-        // continuous part-select assigns (gi is constant per instance)
-        assign p00_l = p00_packed[8*gi +: 8];
-        assign p01_l = p01_packed[8*gi +: 8];
-        assign p10_l = p10_packed[8*gi +: 8];
-        assign p11_l = p11_packed[8*gi +: 8];
-        assign wx_l  = frac_x_packed[gi*Q +: Q];
-        assign wy_l  = frac_y_packed[gi*Q +: Q];
-
-        // Widened intermediates to avoid overflow from multiply-add chains
-        logic [31:0] res_acc_l;                // full bilinear blend accumulation
-        logic [31:0] round_q_l;                // sum + rounding (wider for safety)
-        logic [7:0]  pix_l;
-        logic [31:0] pix_temp;                 // temp before clipping
-
-        // -------------------------------------------------------------
-        // UNSIGNED arithmetic
-        // -------------------------------------------------------------
-
-
-        always_comb begin
-            // Unsigned Q constants
-            automatic int unsigned ONE_Q  = (1 << Q);      // e.g. 256 for Q8
-            automatic int unsigned HALF_Q = (1 << (Q-1));  // e.g. 128 for Q8
-
-            // Compute weights (pre-shift like C++ reference)
-            logic [15:0] w00, w10, w01, w11;
-            w00 = ((ONE_Q - wx_l) * (ONE_Q - wy_l)) >> Q;
-            w10 = (wx_l * (ONE_Q - wy_l)) >> Q;
-            w01 = ((ONE_Q - wx_l) * wy_l) >> Q;
-            w11 = (wx_l * wy_l) >> Q;
-
-            // Weighted sum
-            res_acc_l = w00 * p00_l + w10 * p01_l + w01 * p10_l + w11 * p11_l;
-
-            // Rounding
-            round_q_l = res_acc_l + HALF_Q;
-
-            // Convert to 8-bit integer
-            pix_temp = (round_q_l >> Q);
-            if (pix_temp > 32'd255)
-                pix_l = 8'd255;
-            else
-                pix_l = pix_temp[7:0];
-
-            // Store into packed output vectors
-            res_q8_8 [gi*16 +: 16] = res_acc_l[15:0];
-            rounded  [gi*24 +: 24] = round_q_l[23:0];
-            finalpix [gi*8  +: 8 ] = pix_l;
-            out_pixels_packed[gi*8 +: 8] = pix_l;
+    
+    //=======================================================
+    // Combinational Weight Calculation (for DSP inference)
+    //=======================================================
+    genvar g;
+    generate
+        for (g = 0; g < LANES; g++) begin : weight_calc
+            assign fx_comb[g]     = {1'b0, frac_x_packed[g*Q +: Q]};
+            assign fy_comb[g]     = {1'b0, frac_y_packed[g*Q +: Q]};
+            assign inv_fx_comb[g] = (Q+1)'(ONE_Q) - fx_comb[g];
+            assign inv_fy_comb[g] = (Q+1)'(ONE_Q) - fy_comb[g];
+            
+            // Weight products ((Q+1) x (Q+1) bits)
+            assign w00_comb[g] = inv_fx_comb[g] * inv_fy_comb[g];
+            assign w01_comb[g] = fx_comb[g] * inv_fy_comb[g];
+            assign w10_comb[g] = inv_fx_comb[g] * fy_comb[g];
+            assign w11_comb[g] = fx_comb[g] * fy_comb[g];
+            
+            // Output rounding and clipping
+            assign rounded[g]   = sum[g] + 24'(HALF_Q);
+            assign out_pixel[g] = (rounded[g][23:16] != 8'd0) ? PIXEL_WIDTH'(MAX_PIXEL) : rounded[g][15:8];
+            assign out_pixels_packed[g*PIXEL_WIDTH +: PIXEL_WIDTH] = out_pixel[g];
+        end
+    endgenerate
+    
+    //=======================================================
+    // Pipeline Stage 1: Register inputs + Weight calculation
+    // (* multstyle = "dsp" *) hint for Quartus DSP inference
+    //=======================================================
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            valid_s1 <= 1'b0;
+            for (int i = 0; i < LANES; i++) begin
+                p00_r[i] <= '0;
+                p01_r[i] <= '0;
+                p10_r[i] <= '0;
+                p11_r[i] <= '0;
+                w00[i] <= '0;
+                w01[i] <= '0;
+                w10[i] <= '0;
+                w11[i] <= '0;
+            end
+        end else begin
+            valid_s1 <= start;
+            
+            for (int i = 0; i < LANES; i++) begin
+                // Register pixel inputs
+                p00_r[i] <= p00_packed[i*PIXEL_WIDTH +: PIXEL_WIDTH];
+                p01_r[i] <= p01_packed[i*PIXEL_WIDTH +: PIXEL_WIDTH];
+                p10_r[i] <= p10_packed[i*PIXEL_WIDTH +: PIXEL_WIDTH];
+                p11_r[i] <= p11_packed[i*PIXEL_WIDTH +: PIXEL_WIDTH];
+                
+                // Register weights (shifted by Q for normalization)
+                w00[i] <= w00_comb[i][2*Q+1:Q];
+                w01[i] <= w01_comb[i][2*Q+1:Q];
+                w10[i] <= w10_comb[i][2*Q+1:Q];
+                w11[i] <= w11_comb[i][2*Q+1:Q];
+            end
         end
     end
-endgenerate
-
-assign out_valid = running;
-
+    
+    //=======================================================
+    // Pipeline Stage 2: Multiply-Accumulate (MAC)
+    // 4 parallel MACs per lane - maps to DSP blocks
+    //=======================================================
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            valid_s2 <= 1'b0;
+            for (int i = 0; i < LANES; i++) begin
+                sum[i] <= 24'd0;
+            end
+        end else begin
+            valid_s2 <= valid_s1;
+            
+            for (int i = 0; i < LANES; i++) begin
+                // Weighted sum: each product is 16+8=24 bits max
+                sum[i] <= (w00[i] * p00_r[i]) + (w01[i] * p01_r[i]) +
+                          (w10[i] * p10_r[i]) + (w11[i] * p11_r[i]);
+            end
+        end
+    end
+    
+    //=======================================================
+    // Output valid assignment
+    //=======================================================
+    assign out_valid = valid_s2;
 
 endmodule

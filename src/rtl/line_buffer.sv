@@ -1,11 +1,13 @@
 //=======================================================
 // Line Buffer - Dual-port BRAM for caching image scanlines
 // Stores 2 consecutive rows for bilinear interpolation
+//
+// Parameters inherited from downscaler_top
 //=======================================================
 
 module line_buffer #(
-    parameter int MAX_WIDTH = 2048,    // Maximum image width
-    parameter int DATA_WIDTH = 8       // 8-bit grayscale pixels
+    parameter int MAX_WIDTH  = 2048,    // Maximum image width (from top)
+    parameter int DATA_WIDTH = 8        // Bits per pixel (from top)
 ) (
     input  logic        clk,
     input  logic        rst_n,

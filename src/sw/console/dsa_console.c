@@ -37,8 +37,7 @@ typedef struct {
     uint32_t img_width;
     uint32_t img_height;
     float scale;
-    int mode;
-    int simd_lanes;
+    int mode;           // 0=SIMD (4 lanes), 1=Serial
     bool configured;
     uint8_t *input_image;
     uint8_t *output_image;
@@ -227,13 +226,14 @@ static void dsa_print_status(void) {
 }
 
 static void dsa_print_config(void) {
-    uint32_t in_w, in_h, out_w, out_h, scale_q, mode, version;
+    uint32_t in_w, in_h, out_w, out_h, scale_q, inv_scale, mode, version;
     
     if (dsa_read_csr(CSR_IN_WIDTH, &in_w) != JTAG_OK ||
         dsa_read_csr(CSR_IN_HEIGHT, &in_h) != JTAG_OK ||
         dsa_read_csr(CSR_OUT_WIDTH, &out_w) != JTAG_OK ||
         dsa_read_csr(CSR_OUT_HEIGHT, &out_h) != JTAG_OK ||
         dsa_read_csr(CSR_SCALE_Q8_8, &scale_q) != JTAG_OK ||
+        dsa_read_csr(CSR_INV_SCALE, &inv_scale) != JTAG_OK ||
         dsa_read_csr(CSR_MODE, &mode) != JTAG_OK ||
         dsa_read_csr(CSR_VERSION, &version) != JTAG_OK) {
         printf("Error reading config\n");
@@ -241,46 +241,35 @@ static void dsa_print_config(void) {
     }
 
     printf("=== DSA Configuration ===\n");
-    printf("Version:     %d.%d\n", (version >> 16) & 0xFF, version & 0xFFFF);
+    printf("Version:     %d.%d\n", (version >> 24) & 0xFF, (version >> 16) & 0xFF);
     printf("Input:       %u x %u\n", in_w, in_h);
     printf("Output:      %u x %u\n", out_w, out_h);
-    printf("Scale:       %.3f (Q8.8: 0x%04X)\n", Q8_8_TO_FLOAT(scale_q), scale_q);
-    printf("Mode:        %s\n", (mode & 1) ? "SERIAL" : "SIMD");
-    if ((mode & 1) == 0) {
-        printf("SIMD Lanes:  %u\n", (mode >> MODE_LANES_SHIFT) & 0xF);
-    }
+    printf("Scale:       %.3f (Q8.8: 0x%04X, inv: 0x%08X)\n", Q8_8_TO_FLOAT(scale_q), scale_q, inv_scale);
+    printf("Mode:        %s\n", (mode & 1) ? "SERIAL" : "SIMD (4 lanes)");
 }
 
 static void dsa_print_perf(void) {
-    uint32_t flops_lo, flops_hi, reads_lo, reads_hi;
-    uint32_t writes_lo, writes_hi, cycles_lo, cycles_hi;
+    uint32_t cycles_lo, cycles_hi;
 
-    if (dsa_read_csr(CSR_PERF_FLOPS_LO, &flops_lo) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_FLOPS_HI, &flops_hi) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_READS_LO, &reads_lo) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_READS_HI, &reads_hi) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_WRITES_LO, &writes_lo) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_WRITES_HI, &writes_hi) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_CYCLES_LO, &cycles_lo) != JTAG_OK ||
+    if (dsa_read_csr(CSR_PERF_CYCLES_LO, &cycles_lo) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_CYCLES_HI, &cycles_hi) != JTAG_OK) {
         printf("Error reading perf counters\n");
         return;
     }
 
-    uint64_t flops = ((uint64_t)flops_hi << 32) | flops_lo;
-    uint64_t reads = ((uint64_t)reads_hi << 32) | reads_lo;
-    uint64_t writes = ((uint64_t)writes_hi << 32) | writes_lo;
     uint64_t cycles = ((uint64_t)cycles_hi << 32) | cycles_lo;
 
     printf("=== Performance Counters ===\n");
-    printf("FLOPs:       %llu\n", (unsigned long long)flops);
-    printf("Memory Reads:  %llu bytes\n", (unsigned long long)reads);
-    printf("Memory Writes: %llu bytes\n", (unsigned long long)writes);
     printf("Cycles:      %llu\n", (unsigned long long)cycles);
     
-    if (cycles > 0) {
-        double flops_per_cycle = (double)flops / cycles;
-        printf("FLOPs/Cycle: %.2f\n", flops_per_cycle);
+    // Estimate throughput if we have output dimensions
+    uint32_t out_width = g_state.img_width / (uint32_t)(1.0f / g_state.scale);
+    uint32_t out_height = g_state.img_height / (uint32_t)(1.0f / g_state.scale);
+    uint32_t total_pixels = out_width * out_height;
+    
+    if (cycles > 0 && total_pixels > 0) {
+        double cycles_per_pixel = (double)cycles / total_pixels;
+        printf("Cycles/Pixel: %.2f\n", cycles_per_pixel);
     }
 }
 
@@ -298,41 +287,36 @@ static const char* fsm_state_name(uint32_t state) {
 }
 
 static void dsa_print_debug(void) {
-    uint32_t state_x, y_srcx, srcy_frac, neighbors, output;
-
-    if (dsa_read_csr(CSR_DBG_STATE_X, &state_x) != JTAG_OK ||
-        dsa_read_csr(CSR_DBG_Y_SRCX, &y_srcx) != JTAG_OK ||
-        dsa_read_csr(CSR_DBG_SRCY_FRAC, &srcy_frac) != JTAG_OK ||
-        dsa_read_csr(CSR_DBG_NEIGHBORS, &neighbors) != JTAG_OK ||
-        dsa_read_csr(CSR_DBG_OUTPUT, &output) != JTAG_OK) {
-        printf("Error reading debug registers\n");
+    if (!g_state.jtag.connected) {
+        printf("Error: Not connected. Use 'connect' first.\n");
         return;
     }
-
-    /* Parse fields */
-    uint32_t fsm_state = (state_x >> 28) & 0xF;
-    uint32_t out_x = state_x & 0xFFFF;
-    uint32_t out_y = (y_srcx >> 16) & 0xFFFF;
-    uint32_t src_x_int = y_srcx & 0xFFFF;
-    uint32_t src_y_int = (srcy_frac >> 16) & 0xFFFF;
-    uint32_t frac_x = (srcy_frac >> 8) & 0xFF;
-    uint32_t frac_y = srcy_frac & 0xFF;
-    uint32_t p00 = (neighbors >> 24) & 0xFF;
-    uint32_t p01 = (neighbors >> 16) & 0xFF;
-    uint32_t p10 = (neighbors >> 8) & 0xFF;
-    uint32_t p11 = neighbors & 0xFF;
-    uint32_t out_pixel = (output >> 8) & 0xFF;
-    uint32_t lane_idx = output & 0xF;
-
-    printf("=== Debug/Observability (Lane %u) ===\n", lane_idx);
+    
+    uint32_t dbg_fsm = 0, dbg_coord = 0, dbg_frac = 0, status = 0, progress = 0;
+    
+    dsa_read_csr(CSR_STATUS, &status);
+    dsa_read_csr(CSR_PROGRESS, &progress);
+    dsa_read_csr(CSR_DBG_FSM, &dbg_fsm);
+    dsa_read_csr(CSR_DBG_COORD, &dbg_coord);
+    dsa_read_csr(CSR_DBG_FRAC, &dbg_frac);
+    
+    uint32_t fsm_state = (dbg_fsm >> 16) & 0xF;
+    uint32_t out_x = dbg_fsm & 0xFFFF;
+    uint32_t src_x_int = dbg_coord & 0xFFFF;
+    uint32_t src_y_int = (dbg_coord >> 16) & 0xFFFF;
+    uint32_t frac_x = dbg_frac & 0xFF;
+    uint32_t frac_y = (dbg_frac >> 8) & 0xFF;
+    uint32_t lane = (dbg_frac >> 16) & 0xF;
+    
+    printf("\n=== Debug/Observability ===\n");
+    printf("Status:      busy=%d, done=%d\n", (status & 1), (status >> 1) & 1);
+    printf("Progress:    %u pixels\n", progress);
     printf("FSM State:   %s (%u)\n", fsm_state_name(fsm_state), fsm_state);
-    printf("Output Coord: (%u, %u)\n", out_x, out_y);
-    printf("Source Coord: (%u, %u) + frac(%.3f, %.3f)\n", 
-           src_x_int, src_y_int, 
-           (float)frac_x / 256.0f, (float)frac_y / 256.0f);
-    printf("Neighbors:   p00=%3u  p01=%3u\n", p00, p01);
-    printf("             p10=%3u  p11=%3u\n", p10, p11);
-    printf("Output Pixel: %u\n", out_pixel);
+    printf("Output X:    %u\n", out_x);
+    printf("Source:      x_int=%u, y_int=%u\n", src_x_int, src_y_int);
+    printf("Fractions:   fx=0x%02X (%.3f), fy=0x%02X (%.3f)\n", 
+           frac_x, frac_x / 256.0f, frac_y, frac_y / 256.0f);
+    printf("Lane:        %u\n", lane);
 }
 
 /*===========================================================================
@@ -348,8 +332,7 @@ static void cmd_help(void) {
     printf("  set width <n>        Set input image width\n");
     printf("  set height <n>       Set input image height\n");
     printf("  set scale <f>        Set scale factor (0.5-1.0)\n");
-    printf("  set mode <serial|simd>  Set processing mode\n");
-    printf("  set lanes <n>        Set SIMD lanes (2,4,8)\n");
+    printf("  set mode <serial|simd>  Set processing mode (simd=4 lanes)\n");
     printf("\nExecution:\n");
     printf("  run                  Start processing\n");
     printf("  step                 Execute one step (step mode)\n");
@@ -390,7 +373,8 @@ static void cmd_connect(void) {
         /* Read and verify version */
         uint32_t version;
         if (dsa_read_csr(CSR_VERSION, &version) == JTAG_OK) {
-            printf("DSA Version: %d.%d\n", (version >> 16) & 0xFF, version & 0xFFFF);
+            printf("DSA Version: %d.%d\n", 
+                   (version >> 24) & 0xFF, (version >> 16) & 0xFF);
         }
     } else {
         printf("Connection failed: %s\n", jtag_strerror(ret));
@@ -448,15 +432,16 @@ static void cmd_set(const char *param, const char *value) {
         }
         g_state.scale = s;
         uint32_t scale_q = FLOAT_TO_Q8_8(s);
+        uint32_t inv_scale = COMPUTE_INV_SCALE(scale_q);
         dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
-        printf("Scale set to %.3f (Q8.8: 0x%04X)\n", s, scale_q);
+        dsa_write_csr(CSR_INV_SCALE, inv_scale);
+        printf("Scale set to %.3f (Q8.8: 0x%04X, inv: 0x%08X)\n", s, scale_q, inv_scale);
         
     } else if (strcmp(param, "mode") == 0) {
         if (strcmp(value, "simd") == 0 || strcmp(value, "SIMD") == 0) {
             g_state.mode = MODE_SIMD;
-            uint32_t mode_val = MODE_SIMD | (g_state.simd_lanes << MODE_LANES_SHIFT);
-            dsa_write_csr(CSR_MODE, mode_val);
-            printf("Mode set to SIMD (%d lanes)\n", g_state.simd_lanes);
+            dsa_write_csr(CSR_MODE, MODE_SIMD);
+            printf("Mode set to SIMD (4 lanes)\n");
         } else if (strcmp(value, "serial") == 0 || strcmp(value, "SERIAL") == 0) {
             g_state.mode = MODE_SERIAL;
             dsa_write_csr(CSR_MODE, MODE_SERIAL);
@@ -464,19 +449,6 @@ static void cmd_set(const char *param, const char *value) {
         } else {
             printf("Invalid mode. Use 'simd' or 'serial'\n");
         }
-        
-    } else if (strcmp(param, "lanes") == 0) {
-        int lanes = atoi(value);
-        if (lanes != 2 && lanes != 4 && lanes != 8) {
-            printf("Invalid lanes (2, 4, or 8)\n");
-            return;
-        }
-        g_state.simd_lanes = lanes;
-        if (g_state.mode == MODE_SIMD) {
-            uint32_t mode_val = MODE_SIMD | (lanes << MODE_LANES_SHIFT);
-            dsa_write_csr(CSR_MODE, mode_val);
-        }
-        printf("SIMD lanes set to %d\n", lanes);
         
     } else {
         printf("Unknown parameter: %s\n", param);
@@ -545,6 +517,12 @@ static void cmd_load(const char *filename) {
     uint32_t out_h = (uint32_t)(h * g_state.scale);
     dsa_write_csr(CSR_OUT_WIDTH, out_w);
     dsa_write_csr(CSR_OUT_HEIGHT, out_h);
+
+    /* Write scale and inverse scale */
+    uint32_t scale_q = FLOAT_TO_Q8_8(g_state.scale);
+    uint32_t inv_scale = COMPUTE_INV_SCALE(scale_q);
+    dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
+    dsa_write_csr(CSR_INV_SCALE, inv_scale);
 
     /* Write to SDRAM */
     printf("Uploading to FPGA SDRAM at 0x%08X...\n", DEFAULT_IMG_IN_ADDR);
@@ -729,7 +707,7 @@ static void cmd_compare(const char *reference_file) {
             g_state.img_width, g_state.img_height,
             out_w, out_h,
             scale_q8_8,
-            g_state.simd_lanes,
+            SIMD_LANES,  /* Fixed at 4 lanes */
             &flops, &mem_reads, &mem_writes
         );
     } else {
@@ -764,7 +742,7 @@ static void cmd_compare(const char *reference_file) {
     printf("Scale:       %.4f (Q8.8: 0x%04X)\n", g_state.scale, scale_q8_8);
     printf("Mode:        %s", g_state.mode == MODE_SIMD ? "SIMD" : "Sequential");
     if (g_state.mode == MODE_SIMD) {
-        printf(" (%d lanes)", g_state.simd_lanes);
+        printf(" (%d lanes)", SIMD_LANES);
     }
     printf("\n\n");
 
@@ -967,13 +945,15 @@ static void process_command(char *line) {
  *===========================================================================*/
 
 int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
+    
     printf("=== DSA Downscaler Console v1.0 ===\n");
     printf("Type 'help' for available commands.\n\n");
 
     /* Initialize defaults */
     g_state.scale = 0.5f;
     g_state.mode = MODE_SIMD;
-    g_state.simd_lanes = DEFAULT_SIMD_LANES;
 
     /* Interactive loop */
     char line[512];
