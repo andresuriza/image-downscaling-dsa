@@ -116,25 +116,30 @@ module pixel_fetch_fsm #(
     localparam MODE_SERIAL = 2'd1;
     
     //=======================================================
-    // Coordinate calculation (registered for timing)
-    // src_coord = out_coord * scale_q8_8 (result in Q16.8 format)
+    // Coordinate calculation
+    // Formula: src_coord = out_coord / scale (matching C reference)
+    // Implementation: src_q8 = (out_coord << 16) / scale_q8_8
+    // This gives result in Q8.8 format
     // scale_q8_8 is in Q8.8: integer[15:8], fraction[7:0]
     //=======================================================
-    logic [31:0] coord_product_x, coord_product_y;
+    logic [31:0] dividend_x, dividend_y;
+    logic [31:0] src_coord_x_q8, src_coord_y_q8;
     
-    always_ff @(posedge clk) begin
-        // out_coord * scale_q8_8 gives result in Q16.8
-        // For scale=2.0 (0x200), out_x=1 -> product=0x200 -> src_x_int=2, frac=0
-        coord_product_x <= out_x * scale_q8_8[15:0];
-        coord_product_y <= out_y * scale_q8_8[15:0];
-    end
+    // Prepare dividends: out_coord << 16
+    assign dividend_x = {out_x, 16'd0};
+    assign dividend_y = {out_y, 16'd0};
     
-    // Extract integer and fractional parts from Q16.8 result
-    // Integer part: bits [23:8], Fractional part: bits [7:0]
-    assign src_x_int = coord_product_x[23:8];
-    assign src_y_int = coord_product_y[23:8];
-    assign frac_x = coord_product_x[7:0];
-    assign frac_y = coord_product_y[7:0];
+    // Division: (out_coord << 16) / scale_q8_8 = src_coord in Q8.8
+    // Note: This is combinational division - synthesizes to LUT-based divider
+    assign src_coord_x_q8 = (scale_q8_8[15:0] != 0) ? (dividend_x / scale_q8_8[15:0]) : 32'd0;
+    assign src_coord_y_q8 = (scale_q8_8[15:0] != 0) ? (dividend_y / scale_q8_8[15:0]) : 32'd0;
+    
+    // Extract integer and fractional parts from Q8.8 result
+    // Integer part: bits [15:8], Fractional part: bits [7:0]
+    assign src_x_int = src_coord_x_q8[15:8];
+    assign src_y_int = src_coord_y_q8[15:8];
+    assign frac_x = src_coord_x_q8[7:0];
+    assign frac_y = src_coord_y_q8[7:0];
     
     //=======================================================
     // Address calculation for 4 neighbor pixels
