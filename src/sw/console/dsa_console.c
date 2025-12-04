@@ -262,8 +262,8 @@ static void dsa_print_perf(void) {
     printf("Cycles:      %llu\n", (unsigned long long)cycles);
     
     // Estimate throughput if we have output dimensions
-    uint32_t out_width = g_state.img_width / (uint32_t)(1.0f / g_state.scale);
-    uint32_t out_height = g_state.img_height / (uint32_t)(1.0f / g_state.scale);
+    uint32_t out_width = (uint32_t)(g_state.img_width * g_state.scale);
+    uint32_t out_height = (uint32_t)(g_state.img_height * g_state.scale);
     uint32_t total_pixels = out_width * out_height;
     
     if (cycles > 0 && total_pixels > 0) {
@@ -432,7 +432,13 @@ static void cmd_set(const char *param, const char *value) {
         g_state.scale = s;
         uint32_t scale_q = FLOAT_TO_Q8_8(s);
         dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
-        printf("Scale set to %.3f (Q8.8: 0x%04X)\n", s, scale_q);
+        
+        /* Recalculate output dimensions when scale changes */
+        uint32_t out_w = (uint32_t)(g_state.img_width * s);
+        uint32_t out_h = (uint32_t)(g_state.img_height * s);
+        dsa_write_csr(CSR_OUT_WIDTH, out_w);
+        dsa_write_csr(CSR_OUT_HEIGHT, out_h);
+        printf("Scale set to %.3f (Q8.8: 0x%04X), output: %ux%u\n", s, scale_q, out_w, out_h);
         
     } else if (strcmp(param, "mode") == 0) {
         if (strcmp(value, "simd") == 0 || strcmp(value, "SIMD") == 0) {

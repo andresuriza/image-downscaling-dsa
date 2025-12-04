@@ -119,7 +119,7 @@ module pixel_fetch_fsm #(
     // Coordinate calculation
     // Formula: src_coord = out_coord / scale (matching C reference)
     // Implementation: src_q8 = (out_coord << 16) / scale_q8_8
-    // This gives result in Q8.8 format
+    // Result is in Q16.8 format (16-bit integer, 8-bit fraction)
     // scale_q8_8 is in Q8.8: integer[15:8], fraction[7:0]
     //=======================================================
     logic [31:0] dividend_x, dividend_y;
@@ -129,39 +129,45 @@ module pixel_fetch_fsm #(
     assign dividend_x = {out_x, 16'd0};
     assign dividend_y = {out_y, 16'd0};
     
-    // Division: (out_coord << 16) / scale_q8_8 = src_coord in Q8.8
+    // Division: (out_coord << 16) / scale_q8_8 = src_coord in Q24.8
     // Note: This is combinational division - synthesizes to LUT-based divider
     assign src_coord_x_q8 = (scale_q8_8[15:0] != 0) ? (dividend_x / scale_q8_8[15:0]) : 32'd0;
     assign src_coord_y_q8 = (scale_q8_8[15:0] != 0) ? (dividend_y / scale_q8_8[15:0]) : 32'd0;
     
-    // Extract integer and fractional parts from Q8.8 result
-    // Integer part: bits [15:8], Fractional part: bits [7:0]
-    assign src_x_int = src_coord_x_q8[15:8];
-    assign src_y_int = src_coord_y_q8[15:8];
+    // Extract integer and fractional parts from result
+    // In C: src_int = src_q8 >> 8 (equivalent to bits [31:8])
+    // Result format: integer in bits [23:8] for images up to 64K, fraction in bits [7:0]
+    // src_x_int is 16 bits, we take bits [23:8] to get the integer part
+    assign src_x_int = src_coord_x_q8[23:8];
+    assign src_y_int = src_coord_y_q8[23:8];
     assign frac_x = src_coord_x_q8[7:0];
     assign frac_y = src_coord_y_q8[7:0];
     
     //=======================================================
     // Address calculation for 4 neighbor pixels
+    // Use 32-bit arithmetic to avoid overflow for large images
     //=======================================================
     logic [31:0] addr_p00, addr_p01, addr_p10, addr_p11;
     logic [31:0] addr_out;  // Output pixel address
-    logic [15:0] x0, x1, y0, y1;
+    logic [31:0] x0, x1, y0, y1;  // 32-bit to avoid overflow in multiplication
     
-    // Clamp coordinates to image bounds
-    assign x0 = src_x_int;
-    assign x1 = (src_x_int + 1 < in_width[15:0]) ? src_x_int + 1 : in_width[15:0] - 1;
-    assign y0 = src_y_int;
-    assign y1 = (src_y_int + 1 < in_height[15:0]) ? src_y_int + 1 : in_height[15:0] - 1;
+    // Clamp coordinates to image bounds (matching C reference)
+    // First clamp x0/y0 to valid range, then compute x1/y1
+    wire [31:0] x0_raw = {16'd0, src_x_int};
+    wire [31:0] y0_raw = {16'd0, src_y_int};
+    assign x0 = (x0_raw >= in_width) ? in_width - 32'd1 : x0_raw;
+    assign y0 = (y0_raw >= in_height) ? in_height - 32'd1 : y0_raw;
+    assign x1 = (x0 + 1 < in_width) ? x0 + 32'd1 : in_width - 32'd1;
+    assign y1 = (y0 + 1 < in_height) ? y0 + 32'd1 : in_height - 32'd1;
     
-    // Pixel addresses (row-major layout)
+    // Pixel addresses (row-major layout) - all 32-bit arithmetic
     assign addr_p00 = img_in_addr + y0 * in_width + x0;
     assign addr_p01 = img_in_addr + y0 * in_width + x1;
     assign addr_p10 = img_in_addr + y1 * in_width + x0;
     assign addr_p11 = img_in_addr + y1 * in_width + x1;
     
-    // Output address
-    assign addr_out = img_out_addr + out_y * out_width + out_x;
+    // Output address - all 32-bit arithmetic
+    assign addr_out = img_out_addr + {16'd0, out_y} * out_width + {16'd0, out_x};
     
     //=======================================================
     // Main FSM

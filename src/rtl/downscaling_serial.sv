@@ -8,6 +8,9 @@
 //   result = (1-fx)*(1-fy)*p00 + fx*(1-fy)*p01 + 
 //            (1-fx)*fy*p10 + fx*fy*p11
 //
+// Rounding: Uses Banker's Rounding (round half to even)
+// to eliminate bias when fractional part is exactly 0.5
+//
 // Parameters inherited from downscaler_top
 //=======================================================
 
@@ -62,18 +65,18 @@ module downscaling_serial #(
     
     // Stage 1: Registered inputs and weight calculation
     logic [PIXEL_WIDTH-1:0] p00_r, p01_r, p10_r, p11_r;
-    logic [15:0] w00, w01, w10, w11;
+    // Weights kept at full 18-bit precision (no pre-shift, matching C reference)
+    logic [17:0] w00, w01, w10, w11;
     
-    // Stage 2: Multiply-accumulate result
-    logic [23:0] sum;
+    // Stage 2: Multiply-accumulate result (18-bit weight * 8-bit pixel + sum of 4)
+    logic [27:0] sum;
     
     // Combinational weight calculation signals
     logic [Q:0]     fx_comb, fy_comb;
     logic [Q:0]     inv_fx_comb, inv_fy_comb;
     logic [2*Q+1:0] w00_comb, w01_comb, w10_comb, w11_comb;
     
-    // Combinational output signals
-    logic [23:0] rounded;
+    // Combinational output signals (no rounding, matching C reference)
     logic [PIXEL_WIDTH-1:0] out_pixel_comb;
     
     // Simple status
@@ -127,9 +130,18 @@ module downscaling_serial #(
     assign w10_comb = inv_fx_comb * fy_comb;
     assign w11_comb = fx_comb * fy_comb;
     
-    // Output rounding and clipping
-    assign rounded = sum + HALF_Q;
-    assign out_pixel_comb = (rounded[23:16] != 8'd0) ? MAX_PIXEL[7:0] : rounded[15:8];
+    // Output normalization with Banker's Rounding (round half to even)
+    // When fractional part is exactly 0.5 (0x8000), round to nearest even
+    // This eliminates rounding bias and matches IEEE 754 behavior
+    wire is_exactly_half = (sum[15:0] == 16'h8000);  // Fractional part == 0.5
+    wire result_is_odd   = sum[16];                   // LSB of result after shift
+    
+    // Apply bias only if NOT (exactly half AND result would be even)
+    // i.e., apply bias if: not exactly half, OR result is odd
+    wire apply_bias = ~is_exactly_half | result_is_odd;
+    wire [27:0] sum_rounded = apply_bias ? (sum + 28'h8000) : sum;
+    
+    assign out_pixel_comb = (sum_rounded[27:24] != 4'd0) ? MAX_PIXEL[7:0] : sum_rounded[23:16];
     assign out_pixel = out_pixel_comb;
     
     //=======================================================
@@ -142,10 +154,10 @@ module downscaling_serial #(
             p01_r <= 8'd0;
             p10_r <= 8'd0;
             p11_r <= 8'd0;
-            w00 <= 16'd0;
-            w01 <= 16'd0;
-            w10 <= 16'd0;
-            w11 <= 16'd0;
+            w00 <= 18'd0;
+            w01 <= 18'd0;
+            w10 <= 18'd0;
+            w11 <= 18'd0;
         end else begin
             valid_s1 <= start;
             
@@ -155,11 +167,11 @@ module downscaling_serial #(
             p10_r <= p10;
             p11_r <= p11;
             
-            // Register weights (shifted by Q for normalization)
-            w00 <= w00_comb[17:Q];
-            w01 <= w01_comb[17:Q];
-            w10 <= w10_comb[17:Q];
-            w11 <= w11_comb[17:Q];
+            // Register weights at full precision (no pre-shift, matching C)
+            w00 <= w00_comb[17:0];
+            w01 <= w01_comb[17:0];
+            w10 <= w10_comb[17:0];
+            w11 <= w11_comb[17:0];
         end
     end
     
@@ -170,7 +182,7 @@ module downscaling_serial #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             valid_s2 <= 1'b0;
-            sum <= 24'd0;
+            sum <= 28'd0;
         end else begin
             valid_s2 <= valid_s1;
             
