@@ -30,16 +30,11 @@ void downscale_bilinear_sequential(
 ) {
     uint64_t flops = 0, reads = 0, writes = 0;
     
-    /* Inverse scale for mapping output to input coordinates */
-    /* inv_scale = 1.0 / scale = 256 / scale_q8_8 (in Q8.8) */
-    /* For better precision, we compute src = dst / scale directly */
-    
     for (uint32_t out_y = 0; out_y < out_height; out_y++) {
         for (uint32_t out_x = 0; out_x < out_width; out_x++) {
             
             /* Calculate source coordinates in Q8.8 fixed-point */
-            /* src_x = out_x / scale = out_x * (1/scale) */
-            /* Using: src = out * 256 / scale_q8_8 */
+            /* src = (out << 16) / scale_q8_8 */
             uint32_t src_x_q8 = ((uint32_t)out_x << 16) / scale_q8_8;
             uint32_t src_y_q8 = ((uint32_t)out_y << 16) / scale_q8_8;
             
@@ -120,6 +115,7 @@ void downscale_bilinear_simd(
             for (uint32_t lane = 0; lane < lanes_this_iter; lane++) {
                 uint32_t ox = out_x + lane;
                 
+                /* Calculate source coordinates in Q8.8 fixed-point */
                 uint32_t src_x_q8 = ((uint32_t)ox << 16) / scale_q8_8;
                 uint32_t src_y_q8 = ((uint32_t)out_y << 16) / scale_q8_8;
                 

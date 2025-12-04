@@ -55,7 +55,6 @@ module downscaler_top #(
     logic [31:0] acc_in_width, acc_in_height;
     logic [31:0] acc_out_width, acc_out_height;
     logic [31:0] acc_scale_q8_8;
-    logic [31:0] acc_inv_scale;
     logic [1:0]  acc_mode;
     
     // Stepping control
@@ -165,7 +164,6 @@ module downscaler_top #(
         .acc_out_width    (acc_out_width),
         .acc_out_height   (acc_out_height),
         .acc_scale_q8_8   (acc_scale_q8_8),
-        .acc_inv_scale    (acc_inv_scale),
         .acc_mode         (acc_mode),
         
         // Status inputs (from FSM)
@@ -223,7 +221,6 @@ module downscaler_top #(
         .out_width        (acc_out_width),
         .out_height       (acc_out_height),
         .scale_q8_8       (acc_scale_q8_8),
-        .inv_scale        (acc_inv_scale),
         .mode             (acc_mode),
         .img_in_addr      (img_in_addr),
         .img_out_addr     (img_out_addr),

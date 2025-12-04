@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <EnsembleReport name="qsys_system" kind="qsys_system" version="1.0" fabric="QSYS">
  <!-- Format version 20.1 711 (Future versions may contain additional information.) -->
- <!-- 2025.12.01.13:57:51 -->
+ <!-- 2025.12.04.00:35:13 -->
  <!-- A collection of modules and connections -->
  <parameter name="AUTO_GENERATION_ID">
   <type>java.lang.Integer</type>
-  <value>1764619071</value>
+  <value>1764830113</value>
   <derived>false</derived>
   <enabled>true</enabled>
   <visible>false</visible>
@@ -2619,7 +2619,7 @@ parameters are a RESULT of the module parameters. -->
     <moduleName>csr_ram</moduleName>
     <slaveName>s1</slaveName>
     <name>csr_ram.s1</name>
-    <baseAddress>67125248</baseAddress>
+    <baseAddress>67112960</baseAddress>
     <span>4096</span>
    </memoryBlock>
   </interface>
@@ -7837,7 +7837,7 @@ parameters are a RESULT of the module parameters. -->
   </parameter>
   <parameter name="baseAddress">
    <type>java.math.BigInteger</type>
-   <value>0x04004000</value>
+   <value>0x04001000</value>
    <derived>false</derived>
    <enabled>true</enabled>
    <visible>true</visible>

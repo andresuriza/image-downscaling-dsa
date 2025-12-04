@@ -27,7 +27,6 @@ module pixel_fetch_fsm #(
     input  logic [31:0] out_width,
     input  logic [31:0] out_height,
     input  logic [31:0] scale_q8_8,
-    input  logic [31:0] inv_scale,
     input  logic [1:0]  mode,
     input  logic [31:0] img_in_addr,
     input  logic [31:0] img_out_addr,
@@ -118,18 +117,22 @@ module pixel_fetch_fsm #(
     
     //=======================================================
     // Coordinate calculation (registered for timing)
+    // src_coord = out_coord * scale_q8_8 (result in Q16.8 format)
+    // scale_q8_8 is in Q8.8: integer[15:8], fraction[7:0]
     //=======================================================
     logic [31:0] coord_product_x, coord_product_y;
     
     always_ff @(posedge clk) begin
-        // Pre-compute: out_coord * inv_scale >> 16 gives src in Q8.8
-        coord_product_x <= out_x * inv_scale[31:16];
-        coord_product_y <= out_y * inv_scale[31:16];
+        // out_coord * scale_q8_8 gives result in Q16.8
+        // For scale=2.0 (0x200), out_x=1 -> product=0x200 -> src_x_int=2, frac=0
+        coord_product_x <= out_x * scale_q8_8[15:0];
+        coord_product_y <= out_y * scale_q8_8[15:0];
     end
     
-    // Extract integer and fractional parts
-    assign src_x_int = coord_product_x[15:8];
-    assign src_y_int = coord_product_y[15:8];
+    // Extract integer and fractional parts from Q16.8 result
+    // Integer part: bits [23:8], Fractional part: bits [7:0]
+    assign src_x_int = coord_product_x[23:8];
+    assign src_y_int = coord_product_y[23:8];
     assign frac_x = coord_product_x[7:0];
     assign frac_y = coord_product_y[7:0];
     

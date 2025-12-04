@@ -15,7 +15,6 @@
 `define CSR_OUT_WIDTH      12'h010   // Output image width
 `define CSR_OUT_HEIGHT     12'h014   // Output image height
 `define CSR_SCALE_Q8_8     12'h018   // Q8.8 scale factor
-`define CSR_INV_SCALE      12'h01C   // Inverse scale Q16.16
 `define CSR_MODE           12'h020   // [0]=mode (0=SIMD, 1=Serial)
 `define CSR_PROGRESS       12'h024   // Pixels processed (RO)
 
@@ -65,7 +64,6 @@ module accelerator_csr_bridge #(
     output logic [31:0] acc_out_width,
     output logic [31:0] acc_out_height,
     output logic [31:0] acc_scale_q8_8,
-    output logic [31:0] acc_inv_scale,     // Precomputed inverse scale (Q16.16)
     output logic [1:0]  acc_mode,
     
     // Status inputs
@@ -117,7 +115,6 @@ module accelerator_csr_bridge #(
     logic [31:0] reg_out_width;
     logic [31:0] reg_out_height;
     logic [31:0] reg_scale_q8_8;
-    logic [31:0] reg_inv_scale;      // Inverse scale Q16.16
     logic [31:0] reg_mode;
     logic [31:0] reg_img_in_addr;
     logic [31:0] reg_img_out_addr;
@@ -138,7 +135,6 @@ module accelerator_csr_bridge #(
     assign acc_out_width  = reg_out_width;
     assign acc_out_height = reg_out_height;
     assign acc_scale_q8_8 = reg_scale_q8_8;
-    assign acc_inv_scale  = reg_inv_scale;
     assign acc_mode       = reg_mode[1:0];
     
     assign img_in_addr   = reg_img_in_addr;
@@ -185,7 +181,6 @@ module accelerator_csr_bridge #(
             reg_out_width   <= 32'd256;   // Default output 256x256 (0.5 scale)
             reg_out_height  <= 32'd256;
             reg_scale_q8_8  <= 32'h0080;  // 0.5 in Q8.8 = 128
-            reg_inv_scale   <= 32'h0002_0000; // inv(0.5)=2.0 in Q16.16
             reg_mode        <= 32'd0;     // SIMD mode (0), lanes fixed at 4
             reg_img_in_addr <= 32'h0000_0000;  // SDRAM base
             reg_img_out_addr<= 32'h0010_0000;  // 1MB offset
@@ -208,7 +203,6 @@ module accelerator_csr_bridge #(
                     `CSR_OUT_WIDTH:   reg_out_width   <= avs_writedata;
                     `CSR_OUT_HEIGHT:  reg_out_height  <= avs_writedata;
                     `CSR_SCALE_Q8_8:  reg_scale_q8_8  <= avs_writedata;
-                    `CSR_INV_SCALE:   reg_inv_scale   <= avs_writedata;
                     `CSR_MODE:        reg_mode        <= avs_writedata;
                     `CSR_IMG_IN_ADDR: reg_img_in_addr <= avs_writedata;
                     `CSR_IMG_OUT_ADDR:reg_img_out_addr<= avs_writedata;
@@ -234,7 +228,6 @@ module accelerator_csr_bridge #(
                 `CSR_OUT_WIDTH:    avs_readdata = reg_out_width;
                 `CSR_OUT_HEIGHT:   avs_readdata = reg_out_height;
                 `CSR_SCALE_Q8_8:   avs_readdata = reg_scale_q8_8;
-                `CSR_INV_SCALE:    avs_readdata = reg_inv_scale;
                 `CSR_MODE:         avs_readdata = reg_mode;
                 `CSR_PROGRESS:     avs_readdata = acc_progress;
                 

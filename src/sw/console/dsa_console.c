@@ -226,14 +226,13 @@ static void dsa_print_status(void) {
 }
 
 static void dsa_print_config(void) {
-    uint32_t in_w, in_h, out_w, out_h, scale_q, inv_scale, mode, version;
+    uint32_t in_w, in_h, out_w, out_h, scale_q, mode, version;
     
     if (dsa_read_csr(CSR_IN_WIDTH, &in_w) != JTAG_OK ||
         dsa_read_csr(CSR_IN_HEIGHT, &in_h) != JTAG_OK ||
         dsa_read_csr(CSR_OUT_WIDTH, &out_w) != JTAG_OK ||
         dsa_read_csr(CSR_OUT_HEIGHT, &out_h) != JTAG_OK ||
         dsa_read_csr(CSR_SCALE_Q8_8, &scale_q) != JTAG_OK ||
-        dsa_read_csr(CSR_INV_SCALE, &inv_scale) != JTAG_OK ||
         dsa_read_csr(CSR_MODE, &mode) != JTAG_OK ||
         dsa_read_csr(CSR_VERSION, &version) != JTAG_OK) {
         printf("Error reading config\n");
@@ -244,7 +243,7 @@ static void dsa_print_config(void) {
     printf("Version:     %d.%d\n", (version >> 24) & 0xFF, (version >> 16) & 0xFF);
     printf("Input:       %u x %u\n", in_w, in_h);
     printf("Output:      %u x %u\n", out_w, out_h);
-    printf("Scale:       %.3f (Q8.8: 0x%04X, inv: 0x%08X)\n", Q8_8_TO_FLOAT(scale_q), scale_q, inv_scale);
+    printf("Scale:       %.3f (Q8.8: 0x%04X)\n", Q8_8_TO_FLOAT(scale_q), scale_q);
     printf("Mode:        %s\n", (mode & 1) ? "SERIAL" : "SIMD (4 lanes)");
 }
 
@@ -432,10 +431,8 @@ static void cmd_set(const char *param, const char *value) {
         }
         g_state.scale = s;
         uint32_t scale_q = FLOAT_TO_Q8_8(s);
-        uint32_t inv_scale = COMPUTE_INV_SCALE(scale_q);
         dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
-        dsa_write_csr(CSR_INV_SCALE, inv_scale);
-        printf("Scale set to %.3f (Q8.8: 0x%04X, inv: 0x%08X)\n", s, scale_q, inv_scale);
+        printf("Scale set to %.3f (Q8.8: 0x%04X)\n", s, scale_q);
         
     } else if (strcmp(param, "mode") == 0) {
         if (strcmp(value, "simd") == 0 || strcmp(value, "SIMD") == 0) {
@@ -518,11 +515,9 @@ static void cmd_load(const char *filename) {
     dsa_write_csr(CSR_OUT_WIDTH, out_w);
     dsa_write_csr(CSR_OUT_HEIGHT, out_h);
 
-    /* Write scale and inverse scale */
+    /* Write scale */
     uint32_t scale_q = FLOAT_TO_Q8_8(g_state.scale);
-    uint32_t inv_scale = COMPUTE_INV_SCALE(scale_q);
     dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
-    dsa_write_csr(CSR_INV_SCALE, inv_scale);
 
     /* Write to SDRAM */
     printf("Uploading to FPGA SDRAM at 0x%08X...\n", DEFAULT_IMG_IN_ADDR);

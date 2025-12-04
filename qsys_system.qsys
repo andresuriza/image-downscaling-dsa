@@ -29,7 +29,7 @@
    {
       datum baseAddress
       {
-         value = "67125248";
+         value = "67112960";
          type = "String";
       }
    }
@@ -39,6 +39,11 @@
       {
          value = "5";
          type = "int";
+      }
+      datum sopceditor_expanded
+      {
+         value = "1";
+         type = "boolean";
       }
    }
    element downscaler_top_0.csr_slave
@@ -434,7 +439,7 @@
    start="jtag_master.master"
    end="csr_ram.s1">
   <parameter name="arbitrationPriority" value="1" />
-  <parameter name="baseAddress" value="0x04004000" />
+  <parameter name="baseAddress" value="0x04001000" />
   <parameter name="defaultConnection" value="false" />
  </connection>
  <connection

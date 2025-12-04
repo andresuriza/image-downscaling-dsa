@@ -33,7 +33,6 @@
 #define CSR_OUT_WIDTH       0x010   /* Output image width */
 #define CSR_OUT_HEIGHT      0x014   /* Output image height */
 #define CSR_SCALE_Q8_8      0x018   /* Q8.8 scale factor */
-#define CSR_INV_SCALE       0x01C   /* Inverse scale Q16.16: (1<<32)/scale_q8_8 */
 #define CSR_MODE            0x020   /* Mode configuration */
 #define CSR_PROGRESS        0x024   /* Progress (RO) */
 
@@ -92,7 +91,6 @@
  *===========================================================================*/
 #define FLOAT_TO_Q8_8(f)    ((uint32_t)((f) * 256.0f))
 #define Q8_8_TO_FLOAT(q)    ((float)(q) / 256.0f)
-#define COMPUTE_INV_SCALE(scale_q8_8) ((uint32_t)(((uint64_t)1 << 32) / (scale_q8_8)))
 #define CSR_ADDR(offset)    (CSR_BASE + (offset))
 
 #endif /* DSA_REGISTERS_H */
