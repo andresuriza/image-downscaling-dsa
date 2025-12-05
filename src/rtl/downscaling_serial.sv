@@ -130,17 +130,9 @@ module downscaling_serial #(
     assign w10_comb = inv_fx_comb * fy_comb;
     assign w11_comb = fx_comb * fy_comb;
     
-    // Output normalization with Banker's Rounding (round half to even)
-    // When fractional part is exactly 0.5 (0x8000), round to nearest even
-    // This eliminates rounding bias and matches IEEE 754 behavior
-    wire is_exactly_half = (sum[15:0] == 16'h8000);  // Fractional part == 0.5
-    wire result_is_odd   = sum[16];                   // LSB of result after shift
-    
-    // Apply bias only if NOT (exactly half AND result would be even)
-    // i.e., apply bias if: not exactly half, OR result is odd
-    wire apply_bias = ~is_exactly_half | result_is_odd;
-    wire [27:0] sum_rounded = apply_bias ? (sum + 28'h8000) : sum;
-    
+    // Output normalization: (sum + 0x8000) >> 16 with rounding
+    // Adding 0x8000 (32768) before shift provides round-half-up
+    wire [27:0] sum_rounded = sum + 28'h8000;
     assign out_pixel_comb = (sum_rounded[27:24] != 4'd0) ? MAX_PIXEL[7:0] : sum_rounded[23:16];
     assign out_pixel = out_pixel_comb;
     

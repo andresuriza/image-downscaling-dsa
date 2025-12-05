@@ -145,16 +145,9 @@ module simd_downscaler #(
             assign w10_comb[g] = inv_fx_comb[g] * fy_comb[g];
             assign w11_comb[g] = fx_comb[g] * fy_comb[g];
             
-            // Output normalization with Banker's Rounding (round half to even)
-            // When fractional part is exactly 0.5 (0x8000), round to nearest even
-            // This eliminates rounding bias and matches IEEE 754 behavior
-            wire is_exactly_half = (sum[g][15:0] == 16'h8000);  // Fractional part == 0.5
-            wire result_is_odd   = sum[g][16];                   // LSB of result after shift
-            
-            // Apply bias only if NOT (exactly half AND result would be even)
-            wire apply_bias = ~is_exactly_half | result_is_odd;
-            wire [27:0] sum_rounded = apply_bias ? (sum[g] + 28'h8000) : sum[g];
-            
+            // Output normalization: (sum + 0x8000) >> 16 with rounding
+            // Adding 0x8000 (32768) before shift provides round-half-up
+            wire [27:0] sum_rounded = sum[g] + 28'h8000;
             assign out_pixel[g] = (sum_rounded[27:24] != 4'd0) ? PIXEL_WIDTH'(MAX_PIXEL) : sum_rounded[23:16];
             assign out_pixels_packed[g*PIXEL_WIDTH +: PIXEL_WIDTH] = out_pixel[g];
         end

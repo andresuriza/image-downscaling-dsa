@@ -39,6 +39,7 @@ typedef struct {
     float scale;
     int mode;           // 0=SIMD (4 lanes), 1=Serial
     bool configured;
+    bool stepping_active; // Stepping mode is active
     uint8_t *input_image;
     uint8_t *output_image;
     size_t input_size;
@@ -274,10 +275,14 @@ static void dsa_print_perf(void) {
 
 static const char* fsm_state_name(uint32_t state) {
     static const char* names[] = {
-        "IDLE", "INIT", "FETCH_ROW0", "FETCH_ROW1", 
-        "WAIT_ROWS", "COMPUTE_COORD", "PACK_PIXELS", "WAIT_PROCESS",
-        "WRITE_PIXEL", "WAIT_WRITE", "NEXT_PIXEL", "WAIT_STEP",
-        "DONE", "ERROR"
+        "IDLE",       // 0 - S_IDLE
+        "COMPUTE",    // 1 - S_COMPUTE (compute source coords)
+        "FETCH",      // 2 - S_FETCH (fetch 4 neighbor pixels)
+        "PROCESS",    // 3 - S_PROCESS (wait for downscaler)
+        "WRITE",      // 4 - S_WRITE (write result)
+        "NEXT",       // 5 - S_NEXT (advance to next pixel)
+        "DONE",       // 6 - S_DONE
+        "WAIT_STEP"   // 7 - S_WAIT_STEP (stepping mode pause)
     };
     if (state < sizeof(names)/sizeof(names[0])) {
         return names[state];
@@ -310,12 +315,16 @@ static void dsa_print_debug(void) {
     printf("\n=== Debug/Observability ===\n");
     printf("Status:      busy=%d, done=%d\n", (status & 1), (status >> 1) & 1);
     printf("Progress:    %u pixels\n", progress);
-    printf("FSM State:   %s (%u)\n", fsm_state_name(fsm_state), fsm_state);
+    printf("FSM State:   %s (%u)%s\n", fsm_state_name(fsm_state), fsm_state,
+           (fsm_state == 7) ? " <- Waiting for step" : "");
     printf("Output X:    %u\n", out_x);
     printf("Source:      x_int=%u, y_int=%u\n", src_x_int, src_y_int);
     printf("Fractions:   fx=0x%02X (%.3f), fy=0x%02X (%.3f)\n", 
            frac_x, frac_x / 256.0f, frac_y, frac_y / 256.0f);
     printf("Lane:        %u\n", lane);
+    if (g_state.stepping_active) {
+        printf("Stepping:    ACTIVE (use 's' to step, 'c' to continue)\n");
+    }
 }
 
 /*===========================================================================
@@ -333,9 +342,10 @@ static void cmd_help(void) {
     printf("  set scale <f>        Set scale factor (0.5-1.0)\n");
     printf("  set mode <serial|simd>  Set processing mode (simd=4 lanes)\n");
     printf("\nExecution:\n");
-    printf("  run                  Start processing\n");
-    printf("  step                 Execute one step (step mode)\n");
-    printf("  continue             Continue from pause\n");
+    printf("  run                  Start processing (continuous)\n");
+    printf("  run step             Start in stepping mode (pause before each pixel)\n");
+    printf("  step, s              Execute one step / start stepping mode\n");
+    printf("  continue, c          Continue (disable stepping mode)\n");
     printf("  abort                Abort current operation\n");
     printf("  reset                Reset accelerator\n");
     printf("\nImage I/O:\n");
@@ -348,7 +358,7 @@ static void cmd_help(void) {
     printf("  show status          Show accelerator status\n");
     printf("  show config          Show configuration\n");
     printf("  show perf            Show performance counters\n");
-    printf("  show debug           Show debug registers (stepping)\n");
+    printf("  show debug           Show debug registers (FSM state, coords)\n");
     printf("  show all             Show everything\n");
     printf("  read <addr>          Read CSR at offset (hex)\n");
     printf("  write <addr> <val>   Write CSR (hex)\n");
@@ -458,17 +468,29 @@ static void cmd_set(const char *param, const char *value) {
     }
 }
 
-static void cmd_run(void) {
+static void cmd_run(const char *arg) {
     if (!g_state.jtag.connected) {
         printf("Error: Not connected.\n");
         return;
     }
 
-    /* Reset first, then start */
+    /* Reset first */
     dsa_write_csr(CSR_CTRL, CTRL_RESET);
     dsa_write_csr(CSR_CTRL, 0);
-    dsa_write_csr(CSR_CTRL, CTRL_START);
-    printf("Started processing...\n");
+    
+    /* Check if stepping mode requested */
+    if (arg && (strcmp(arg, "step") == 0 || strcmp(arg, "stepping") == 0)) {
+        /* Start in stepping mode - will wait at S_WAIT_STEP */
+        dsa_write_csr(CSR_CTRL, CTRL_START | CTRL_STEP_ENABLE);
+        g_state.stepping_active = true;
+        printf("Started in stepping mode. Use 'step' or 's' to advance.\n");
+        dsa_print_debug();
+    } else {
+        /* Normal run */
+        dsa_write_csr(CSR_CTRL, CTRL_START);
+        g_state.stepping_active = false;
+        printf("Started processing...\n");
+    }
 }
 
 static void cmd_step(void) {
@@ -477,11 +499,31 @@ static void cmd_step(void) {
         return;
     }
 
-    /* Enable step mode and trigger one step */
-    dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
-    printf("Stepped.\n");
+    /* Check if stepping is active */
+    if (!g_state.stepping_active) {
+        /* Not in stepping mode - start in stepping mode */
+        dsa_write_csr(CSR_CTRL, CTRL_RESET);
+        dsa_write_csr(CSR_CTRL, 0);
+        dsa_write_csr(CSR_CTRL, CTRL_START | CTRL_STEP_ENABLE);
+        g_state.stepping_active = true;
+        printf("Started in stepping mode. Waiting at first pixel.\n");
+    } else {
+        /* Already in stepping mode - send step pulse */
+        /* Keep STEP_ENABLE set, pulse STEP_ONCE */
+        dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
+        printf("Stepped.\n");
+    }
+    
     dsa_print_status();
     dsa_print_debug();
+    
+    /* Check if done */
+    uint32_t status = 0;
+    dsa_read_csr(CSR_STATUS, &status);
+    if (status & STATUS_DONE) {
+        printf("Processing complete!\n");
+        g_state.stepping_active = false;
+    }
 }
 
 static void cmd_abort(void) {
@@ -492,6 +534,7 @@ static void cmd_abort(void) {
 
     dsa_write_csr(CSR_CTRL, CTRL_RESET);
     dsa_write_csr(CSR_CTRL, 0);
+    g_state.stepping_active = false;
     printf("Aborted.\n");
 }
 
@@ -887,13 +930,15 @@ static void process_command(char *line) {
             cmd_show("all");
         }
     } else if (strcmp(cmd, "run") == 0 || strcmp(cmd, "r") == 0) {
-        cmd_run();
+        cmd_run(arg1[0] ? arg1 : NULL);
     } else if (strcmp(cmd, "step") == 0 || strcmp(cmd, "s") == 0) {
         cmd_step();
     } else if (strcmp(cmd, "continue") == 0 || strcmp(cmd, "c") == 0) {
         if (g_state.jtag.connected) {
-            dsa_write_csr(CSR_CTRL, CTRL_START);
-            printf("Continuing...\n");
+            /* Disable stepping mode and continue */
+            dsa_write_csr(CSR_CTRL, 0); /* Clear step_enable */
+            g_state.stepping_active = false;
+            printf("Continuing (stepping disabled)...\n");
         }
     } else if (strcmp(cmd, "abort") == 0) {
         cmd_abort();

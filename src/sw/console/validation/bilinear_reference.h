@@ -118,19 +118,9 @@ static inline uint8_t bilinear_interpolate(
     /* Result is in Q16.16 + 8 = Q24.16 effectively */
     uint32_t sum = w00 * p00 + w01 * p01 + w10 * p10 + w11 * p11;
     
-    /* Normalize: divide by 65536 (shift right by 16) with banker's rounding */
-    /* Round half to even: when exactly 0.5, round to nearest even number */
-    uint8_t result;
-    uint16_t frac_part = sum & 0xFFFF;           /* Fractional bits [15:0] */
-    uint8_t int_lsb = (sum >> 16) & 1;           /* LSB of integer part (odd/even) */
-    
-    if (frac_part == 0x8000 && int_lsb == 0) {
-        /* Exactly half and result would be even: round down (no bias) */
-        result = (uint8_t)(sum >> 16);
-    } else {
-        /* Normal case: add 0.5 bias for rounding */
-        result = (uint8_t)((sum + 0x8000) >> 16);
-    }
+    /* Normalize: divide by 65536 (shift right by 16) with rounding */
+    /* Add 0x8000 (0.5 in Q16) before shift for proper rounding */
+    uint8_t result = (uint8_t)((sum + 0x8000) >> 16);
     
     return result;
 }

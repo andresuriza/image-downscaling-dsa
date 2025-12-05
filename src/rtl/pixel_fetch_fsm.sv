@@ -76,16 +76,17 @@ module pixel_fetch_fsm #(
 );
 
     //=======================================================
-    // Simplified FSM - Only 8 states
+    // Simplified FSM - 8 states including stepping
     //=======================================================
-    typedef enum logic [2:0] {
-        S_IDLE      = 3'd0,
-        S_COMPUTE   = 3'd1,  // Compute source coords
-        S_FETCH     = 3'd2,  // Fetch 4 pixels (sequential)
-        S_PROCESS   = 3'd3,  // Wait for downscaler
-        S_WRITE     = 3'd4,  // Write result
-        S_NEXT      = 3'd5,  // Advance to next pixel
-        S_DONE      = 3'd6
+    typedef enum logic [3:0] {
+        S_IDLE      = 4'd0,
+        S_COMPUTE   = 4'd1,  // Compute source coords
+        S_FETCH     = 4'd2,  // Fetch 4 pixels (sequential)
+        S_PROCESS   = 4'd3,  // Wait for downscaler
+        S_WRITE     = 4'd4,  // Write result
+        S_NEXT      = 4'd5,  // Advance to next pixel
+        S_DONE      = 4'd6,
+        S_WAIT_STEP = 4'd7   // Wait for step_once when stepping
     } state_t;
     
     state_t state;
@@ -214,13 +215,18 @@ module pixel_fetch_fsm #(
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
                     if (start) begin
-                        state <= S_COMPUTE;
                         busy <= 1'b1;
                         out_x <= 16'd0;
                         out_y <= 16'd0;
                         progress <= 32'd0;
                         perf_mem_reads <= 64'd0;
                         perf_mem_writes <= 64'd0;
+                        // If stepping mode, wait for step_once before first compute
+                        if (step_enable) begin
+                            state <= S_WAIT_STEP;
+                        end else begin
+                            state <= S_COMPUTE;
+                        end
                     end
                 end
                 
@@ -351,10 +357,30 @@ module pixel_fetch_fsm #(
                             state <= S_DONE;
                         end else begin
                             out_y <= out_y + 1;
-                            state <= S_COMPUTE;
+                            // If stepping mode, wait for step_once before next pixel
+                            if (step_enable) begin
+                                state <= S_WAIT_STEP;
+                            end else begin
+                                state <= S_COMPUTE;
+                            end
                         end
                     end else begin
                         out_x <= out_x + 1;
+                        // If stepping mode, wait for step_once before next pixel
+                        if (step_enable) begin
+                            state <= S_WAIT_STEP;
+                        end else begin
+                            state <= S_COMPUTE;
+                        end
+                    end
+                end
+                
+                S_WAIT_STEP: begin
+                    // Wait for step_once pulse to proceed to S_COMPUTE
+                    sdram_read <= 1'b0;
+                    sdram_write <= 1'b0;
+                    pixels_valid <= 1'b0;
+                    if (step_once || !step_enable) begin
                         state <= S_COMPUTE;
                     end
                 end
@@ -379,7 +405,7 @@ module pixel_fetch_fsm #(
     //=======================================================
     // Debug outputs
     //=======================================================
-    assign dbg_fsm_state = {1'b0, state};
+    assign dbg_fsm_state = state;
     assign dbg_out_x = out_x;
     assign dbg_out_y = out_y;
     assign dbg_src_x_int = src_x_int;
