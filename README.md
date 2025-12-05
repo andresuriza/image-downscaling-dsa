@@ -82,3 +82,74 @@ cd src\sw\console
 | `verbose <0\|1>` | Activar/desactivar modo verbose |
 | `help` | Mostrar ayuda |
 | `quit` | Salir de la consola |
+
+---
+
+## 5. Generación de Imágenes de Prueba
+
+```bash
+cd test/scripts
+python3 generate_tests_from_c.py
+```
+
+Esto genera imágenes de prueba en el directorio `test_images/`.
+
+---
+
+## 6. Validación de Referencias
+
+```bash
+make validate_c_ref
+```
+
+Esto valida la interpolación bilineal en Python y SystemVerilog contra el modelo de referencia en C.
+
+---
+
+## 7. Ejecución de Pruebas Unitarias
+
+```bash
+make test_units
+```
+
+Esto ejecuta las pruebas unitarias para los módulos SIMD y Serial.
+
+---
+
+## 8. Pruebas de Integración
+
+```bash
+make sim_top
+```
+
+Esto ejecuta pruebas de integración para el sistema completo.
+
+---
+
+## 9. Comparación de Implementaciones
+
+```bash
+make sim_compare
+```
+
+Esto compara las salidas de las implementaciones SIMD y Serial.
+
+---
+
+## 10. Ejecución de Todas las Pruebas
+
+```bash
+make test_all
+```
+
+Esto ejecuta todas las pruebas en secuencia: validación, unitarias, integración y comparación.
+
+---
+
+## 11. Limpieza
+
+```bash
+make clean
+```
+
+Esto elimina archivos generados y artefactos de simulación.
