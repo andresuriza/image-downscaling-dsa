@@ -1,5 +1,5 @@
 # vsim -c work.downscaler_top_tb -L altera_mf_ver -do "run -all; quit -f" 
-# Start time: 11:35:31 on Dec 05,2025
+# Start time: 11:46:51 on Dec 05,2025
 # Loading sv_std.std
 # Loading work.downscaler_top_tb
 # Loading work.downscaler_top
@@ -64,5 +64,5 @@
 #   *** ALL TESTS PASSED ***
 # ** Note: $finish    : tb/downscaler_top_tb.sv(707)
 #    Time: 28330 ns  Iteration: 1  Instance: /downscaler_top_tb
-# End time: 11:35:32 on Dec 05,2025, Elapsed time: 0:00:01
+# End time: 11:46:51 on Dec 05,2025, Elapsed time: 0:00:00
 # Errors: 0, Warnings: 0
