@@ -46,8 +46,10 @@
 
 /* Debug Registers (read-only) */
 #define CSR_DBG_FSM         0x0F0   /* [19:16]=FSM state, [15:0]=out_x */
+#define CSR_DBG_OUT_Y       0x0E0   /* [15:0]=out_y */
 #define CSR_DBG_COORD       0x0F4   /* [31:16]=src_y_int, [15:0]=src_x_int */
 #define CSR_DBG_FRAC        0x0F8   /* [19:16]=lane, [15:8]=frac_y, [7:0]=frac_x */
+#define CSR_DBG_PIXELS      0x0E4   /* [31:24]=p11, [23:16]=p10, [15:8]=p01, [7:0]=p00 */
 
 /* Version */
 #define CSR_VERSION         0x0FC

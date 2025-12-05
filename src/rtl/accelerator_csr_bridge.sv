@@ -27,6 +27,8 @@
 `define CSR_PERF_CYCLES_HI 12'h05C   // Cycle counter [63:32]
 
 // Debug registers
+`define CSR_DBG_OUT_Y      12'h0E0   // Debug: out_y[15:0]
+`define CSR_DBG_PIXELS     12'h0E4   // Debug: p11[31:24], p10[23:16], p01[15:8], p00[7:0]
 `define CSR_DBG_FSM        12'h0F0   // Debug: FSM state [3:0], out_x[15:0], out_y[15:0]
 `define CSR_DBG_COORD      12'h0F4   // Debug: src_x_int[15:0], src_y_int[15:0]
 `define CSR_DBG_FRAC       12'h0F8   // Debug: frac_x[7:0], frac_y[7:0], lane[3:0]
@@ -146,6 +148,15 @@ module accelerator_csr_bridge #(
     //=======================================================
     // Cycle Counter Logic
     //=======================================================
+    // Detect start/reset commands from CTRL register writes
+    logic start_cmd, reset_cmd;
+    assign start_cmd = avs_write && (avs_address == `CSR_CTRL) && avs_writedata[0];
+    assign reset_cmd = avs_write && (avs_address == `CSR_CTRL) && avs_writedata[1];
+    
+    // S_WAIT_STEP state = 7, don't count cycles while waiting for step
+    logic fsm_waiting_step;
+    assign fsm_waiting_step = (dbg_fsm_state == 4'd7);
+    
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cycle_counter <= 64'd0;
@@ -154,13 +165,13 @@ module accelerator_csr_bridge #(
         end else begin
             was_busy <= acc_busy;
             
-            // Detect rising edge of busy (start) - reset counter
-            if (acc_busy && !was_busy) begin
+            // Reset counter on explicit reset command or start command
+            if (reset_cmd || start_cmd) begin
                 cycle_counter <= 64'd0;
                 done_flag <= 1'b0;
             end
-            // Count while busy
-            else if (acc_busy) begin
+            // Count while busy AND not waiting for step
+            else if (acc_busy && !fsm_waiting_step) begin
                 cycle_counter <= cycle_counter + 1;
             end
             // Detect falling edge of busy (done)
@@ -243,6 +254,8 @@ module accelerator_csr_bridge #(
                 `CSR_VERSION:      avs_readdata = 32'h0001_0000;
                 
                 // Debug registers (read-only)
+                `CSR_DBG_OUT_Y:    avs_readdata = {16'd0, dbg_out_y};
+                `CSR_DBG_PIXELS:   avs_readdata = {dbg_p11, dbg_p10, dbg_p01, dbg_p00};
                 `CSR_DBG_FSM:      avs_readdata = {12'd0, dbg_fsm_state, dbg_out_x};
                 `CSR_DBG_COORD:    avs_readdata = {dbg_src_y_int, dbg_src_x_int};
                 `CSR_DBG_FRAC:     avs_readdata = {12'd0, dbg_lane_index, dbg_frac_y, dbg_frac_x};
