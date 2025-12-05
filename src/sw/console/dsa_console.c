@@ -25,6 +25,14 @@
 #include <stdint.h>
 #include <ctype.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <conio.h>  /* For _kbhit() */
+#else
+#include <unistd.h>
+#include <sys/select.h>
+#endif
+
 #include "dsa_registers.h"
 #include "jtag_comm.h"
 #include "validation/bilinear_reference.h"
@@ -40,6 +48,7 @@ typedef struct {
     int mode;           // 0=SIMD (4 lanes), 1=Serial
     bool configured;
     bool stepping_active; // Stepping mode is active
+    uint32_t step_delay_us; // Delay between steps in microseconds (0 = use normal clock)
     uint8_t *input_image;
     uint8_t *output_image;
     size_t input_size;
@@ -171,7 +180,6 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
     *width = w;
     *height = h;
     fclose(fp);
-    printf("Loaded %s image: %dx%d (%s format)\n", filename, w, h, is_binary ? "P5/binary" : "P2/ASCII");
     return 0;
 }
 
@@ -200,37 +208,6 @@ static int dsa_write_csr(uint32_t offset, uint32_t value) {
     return jtag_write_32(&g_state.jtag, CSR_ADDR(offset), value);
 }
 
-static void dsa_print_status(void) {
-    uint32_t status, ctrl, progress, out_w, out_h;
-    
-    if (dsa_read_csr(CSR_STATUS, &status) != JTAG_OK ||
-        dsa_read_csr(CSR_CTRL, &ctrl) != JTAG_OK ||
-        dsa_read_csr(CSR_PROGRESS, &progress) != JTAG_OK ||
-        dsa_read_csr(CSR_OUT_WIDTH, &out_w) != JTAG_OK ||
-        dsa_read_csr(CSR_OUT_HEIGHT, &out_h) != JTAG_OK) {
-        printf("Error reading status\n");
-        return;
-    }
-
-    uint32_t total_pixels = out_w * out_h;
-    float percent = (total_pixels > 0) ? (100.0f * progress / total_pixels) : 0.0f;
-
-    printf("=== DSA Status ===\n");
-    printf("CTRL:     0x%08X", ctrl);
-    printf(" [%s%s%s%s]\n",
-           (ctrl & CTRL_START) ? "START " : "",
-           (ctrl & CTRL_RESET) ? "RESET " : "",
-           (ctrl & CTRL_STEP_ENABLE) ? "STEP_EN " : "",
-           (ctrl & CTRL_STEP_ONCE) ? "STEP " : "");
-    
-    printf("STATUS:   0x%08X", status);
-    printf(" [%s%s]\n",
-           (status & STATUS_BUSY) ? "BUSY " : "",
-           (status & STATUS_DONE) ? "DONE " : "");
-    
-    printf("PROGRESS: %u / %u pixels (%.1f%%)\n", progress, total_pixels, percent);
-}
-
 static void dsa_print_config(void) {
     uint32_t in_w, in_h, out_w, out_h, scale_q, mode, version;
     
@@ -245,24 +222,21 @@ static void dsa_print_config(void) {
         return;
     }
 
-    printf("=== DSA Configuration ===\n");
-    printf("Version:     %d.%d\n", (version >> 24) & 0xFF, (version >> 16) & 0xFF);
-    printf("Input:       %u x %u\n", in_w, in_h);
-    printf("Output:      %u x %u\n", out_w, out_h);
-    printf("Scale:       %.3f (Q8.8: 0x%04X)\n", Q8_8_TO_FLOAT(scale_q), scale_q);
-    printf("Mode:        %s\n", (mode & 1) ? "SERIAL" : "SIMD (4 lanes)");
+    printf("=== Configuration ===\n");
+    printf("Version:  %d.%d\n", (version >> 24) & 0xFF, (version >> 16) & 0xFF);
+    printf("Input:    %u x %u\n", in_w, in_h);
+    printf("Output:   %u x %u\n", out_w, out_h);
+    printf("Scale:    %.2f\n", Q8_8_TO_FLOAT(scale_q));
+    printf("Mode:     %s\n", (mode & 1) ? "Serial" : "SIMD (4 lanes)");
 }
 
 static void dsa_print_perf(void) {
     uint32_t cycles_lo, cycles_hi, progress;
-    uint32_t reuse_lo, reuse_hi;
     uint32_t mem_rd_lo, mem_rd_hi, mem_wr_lo, mem_wr_hi;
     uint32_t flops_lo, flops_hi;
 
     if (dsa_read_csr(CSR_PERF_CYCLES_LO, &cycles_lo) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_CYCLES_HI, &cycles_hi) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_REUSE_LO, &reuse_lo) != JTAG_OK ||
-        dsa_read_csr(CSR_PERF_REUSE_HI, &reuse_hi) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_MEM_RD_LO, &mem_rd_lo) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_MEM_RD_HI, &mem_rd_hi) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_MEM_WR_LO, &mem_wr_lo) != JTAG_OK ||
@@ -270,69 +244,38 @@ static void dsa_print_perf(void) {
         dsa_read_csr(CSR_PERF_FLOPS_LO, &flops_lo) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_FLOPS_HI, &flops_hi) != JTAG_OK ||
         dsa_read_csr(CSR_PROGRESS, &progress) != JTAG_OK) {
-        printf("Error reading perf counters\n");
+        printf("Error reading perf\n");
         return;
     }
 
     uint64_t cycles = ((uint64_t)cycles_hi << 32) | cycles_lo;
-    uint64_t pixel_reuse = ((uint64_t)reuse_hi << 32) | reuse_lo;
     uint64_t mem_reads = ((uint64_t)mem_rd_hi << 32) | mem_rd_lo;
     uint64_t mem_writes = ((uint64_t)mem_wr_hi << 32) | mem_wr_lo;
     uint64_t flops = ((uint64_t)flops_hi << 32) | flops_lo;
+    
+    uint32_t out_w = (uint32_t)(g_state.img_width * g_state.scale);
+    uint32_t out_h = (uint32_t)(g_state.img_height * g_state.scale);
+    uint32_t total = out_w * out_h;
 
-    printf("=== Performance Counters ===\n");
-    printf("Cycles:       %llu\n", (unsigned long long)cycles);
-    
-    /* Calculate cycles per pixel based on actual progress */
-    if (cycles > 0 && progress > 0) {
-        double cycles_per_pixel = (double)cycles / progress;
-        printf("Cycles/Pixel: %.2f\n", cycles_per_pixel);
-    }
-    
-    /* FLOPs counter - 8 FLOPs per pixel (bilinear interpolation) */
-    printf("\n--- Compute Performance ---\n");
-    printf("FLOPs:        %llu", (unsigned long long)flops);
-    if (cycles > 0) {
-        double flops_per_cycle = (double)flops / cycles;
-        printf(" (%.2f FLOPs/cycle)", flops_per_cycle);
-    }
-    printf("\n");
-    if (cycles > 0) {
-        /* Estimate MFLOPS at 50MHz */
-        double mflops = (double)flops / (double)cycles * 50.0;  /* 50MHz clock */
-        printf("Throughput:   %.2f MFLOPS @ 50MHz\n", mflops);
-    }
-    
-    /* Pixel reuse statistics */
-    printf("\n--- Memory Optimization ---\n");
-    printf("Pixel Reuse:  %llu", (unsigned long long)pixel_reuse);
+    printf("=== Performance ===\n");
+    printf("Cycles:      %llu\n", (unsigned long long)cycles);
     if (progress > 0) {
-        double reuse_pct = 100.0 * pixel_reuse / progress;
-        printf(" / %u pixels (%.1f%%)", progress, reuse_pct);
+        printf("Cycles/px:   %.2f\n", (double)cycles / progress);
+    }
+    printf("FLOPs:       %llu", (unsigned long long)flops);
+    if (cycles > 0) {
+        printf(" (%.2f FLOPs/cycle)", (double)flops / cycles);
     }
     printf("\n");
-    
-    /* Memory access counters */
-    printf("Memory Reads: %llu", (unsigned long long)mem_reads);
+    printf("Mem reads:   %llu\n", (unsigned long long)mem_reads);
+    printf("Mem writes:  %llu\n", (unsigned long long)mem_writes);
     if (progress > 0) {
-        /* Without reuse: 4 reads per pixel. Calculate savings. */
-        uint64_t reads_without_reuse = (uint64_t)progress * 4;
-        double savings_pct = 100.0 * (1.0 - (double)mem_reads / reads_without_reuse);
-        printf(" (%.1f%% saved vs no reuse)", savings_pct);
+        double savings = 100.0 * (1.0 - (double)mem_reads / ((uint64_t)progress * 4));
+        printf("Cache hit:   %.1f%%\n", savings);
     }
-    printf("\n");
-    printf("Memory Writes: %llu\n", (unsigned long long)mem_writes);
-    
-    /* Estimate total time at 50MHz clock */
-    uint32_t out_width = (uint32_t)(g_state.img_width * g_state.scale);
-    uint32_t out_height = (uint32_t)(g_state.img_height * g_state.scale);
-    uint32_t total_pixels = out_width * out_height;
-    
-    if (cycles > 0 && progress > 0 && total_pixels > 0) {
-        double cycles_per_pixel = (double)cycles / progress;
-        uint64_t estimated_total_cycles = (uint64_t)(cycles_per_pixel * total_pixels);
-        double estimated_time_ms = estimated_total_cycles / 50000.0; /* 50MHz clock */
-        printf("Est. Total:   %.2f ms (for %u pixels @ 50MHz)\n", estimated_time_ms, total_pixels);
+    if (progress > 0 && total > 0) {
+        double est_ms = ((double)cycles / progress * total) / 50000.0;
+        printf("Est. time:   %.2f ms @50MHz\n", est_ms);
     }
 }
 
@@ -355,12 +298,11 @@ static const char* fsm_state_name(uint32_t state) {
 
 static void dsa_print_debug(void) {
     if (!g_state.jtag.connected) {
-        printf("Error: Not connected. Use 'connect' first.\n");
+        printf("Not connected\n");
         return;
     }
     
-    uint32_t dbg_fsm = 0, dbg_out_y_reg = 0, dbg_coord = 0, dbg_frac = 0;
-    uint32_t dbg_pixels = 0, status = 0, progress = 0, out_w = 0, out_h = 0;
+    uint32_t dbg_fsm = 0, dbg_out_y_reg = 0, status = 0, progress = 0, out_w = 0, out_h = 0;
     
     dsa_read_csr(CSR_STATUS, &status);
     dsa_read_csr(CSR_PROGRESS, &progress);
@@ -368,38 +310,50 @@ static void dsa_print_debug(void) {
     dsa_read_csr(CSR_OUT_HEIGHT, &out_h);
     dsa_read_csr(CSR_DBG_FSM, &dbg_fsm);
     dsa_read_csr(CSR_DBG_OUT_Y, &dbg_out_y_reg);
-    dsa_read_csr(CSR_DBG_COORD, &dbg_coord);
-    dsa_read_csr(CSR_DBG_FRAC, &dbg_frac);
-    dsa_read_csr(CSR_DBG_PIXELS, &dbg_pixels);
     
-    uint32_t total_pixels = out_w * out_h;
-    float percent = (total_pixels > 0) ? (100.0f * progress / total_pixels) : 0.0f;
-    uint32_t fsm_state = (dbg_fsm >> 16) & 0xF;
+    /* Read per-lane debug info */
+    uint32_t lane_coord[4], lane_frac[4], lane_pix[4];
+    dsa_read_csr(CSR_DBG_COORD, &lane_coord[0]);
+    dsa_read_csr(CSR_DBG_FRAC, &lane_frac[0]);
+    dsa_read_csr(CSR_DBG_PIXELS, &lane_pix[0]);
+    dsa_read_csr(CSR_DBG_LANE1_COORD, &lane_coord[1]);
+    dsa_read_csr(CSR_DBG_LANE1_FRAC, &lane_frac[1]);
+    dsa_read_csr(CSR_DBG_LANE1_PIX, &lane_pix[1]);
+    dsa_read_csr(CSR_DBG_LANE2_COORD, &lane_coord[2]);
+    dsa_read_csr(CSR_DBG_LANE2_FRAC, &lane_frac[2]);
+    dsa_read_csr(CSR_DBG_LANE2_PIX, &lane_pix[2]);
+    dsa_read_csr(CSR_DBG_LANE3_COORD, &lane_coord[3]);
+    dsa_read_csr(CSR_DBG_LANE3_FRAC, &lane_frac[3]);
+    dsa_read_csr(CSR_DBG_LANE3_PIX, &lane_pix[3]);
+    
+    uint32_t total = out_w * out_h;
+    uint32_t fsm = (dbg_fsm >> 16) & 0xF;
     uint32_t out_x = dbg_fsm & 0xFFFF;
     uint32_t out_y = dbg_out_y_reg & 0xFFFF;
-    uint32_t src_x_int = dbg_coord & 0xFFFF;
-    uint32_t src_y_int = (dbg_coord >> 16) & 0xFFFF;
-    uint32_t frac_x = dbg_frac & 0xFF;
-    uint32_t frac_y = (dbg_frac >> 8) & 0xFF;
-    uint32_t lane = (dbg_frac >> 16) & 0xF;
-    uint32_t p00 = dbg_pixels & 0xFF;
-    uint32_t p01 = (dbg_pixels >> 8) & 0xFF;
-    uint32_t p10 = (dbg_pixels >> 16) & 0xFF;
-    uint32_t p11 = (dbg_pixels >> 24) & 0xFF;
+    uint32_t num_lanes = (g_state.mode == MODE_SIMD) ? 4 : 1;
+    float pct = (total > 0) ? (100.0f * progress / total) : 0.0f;
     
-    printf("\n=== Debug/Observability ===\n");
-    printf("Status:      busy=%d, done=%d\n", (status & 1), (status >> 1) & 1);
-    printf("Progress:    %u / %u pixels (%.1f%%)\n", progress, total_pixels, percent);
-    printf("FSM State:   %s (%u)%s\n", fsm_state_name(fsm_state), fsm_state,
-           (fsm_state == 7) ? " <- Waiting for step" : "");
-    printf("Output:      (%u, %u)\n", out_x, out_y);
-    printf("Source Int:  (%u, %u)\n", src_x_int, src_y_int);
-    printf("Fractions:   fx=0x%02X (%.4f), fy=0x%02X (%.4f)\n", 
-           frac_x, frac_x / 256.0f, frac_y, frac_y / 256.0f);
-    printf("Neighbors:   p00=%3u, p01=%3u, p10=%3u, p11=%3u\n", p00, p01, p10, p11);
-    printf("Lane:        %u\n", lane);
-    if (g_state.stepping_active) {
-        printf("Stepping:    ACTIVE (use 's' to step, 'c' to continue)\n");
+    printf("=== Debug ===\n");
+    printf("Progress:  %u / %u (%.1f%%)\n", progress, total, pct);
+    printf("Status:    %s%s\n", 
+           fsm_state_name(fsm),
+           (status & STATUS_DONE) ? " [DONE]" : ((status & STATUS_BUSY) ? " [BUSY]" : " [IDLE]"));
+    printf("Output:    (%u, %u)\n", out_x, out_y);
+    
+    /* Print per-lane details */
+    printf("Lanes:\n");
+    for (uint32_t i = 0; i < num_lanes; i++) {
+        uint32_t src_x = lane_coord[i] & 0xFFFF;
+        uint32_t src_y = (lane_coord[i] >> 16) & 0xFFFF;
+        uint32_t fx = lane_frac[i] & 0xFF;
+        uint32_t fy = (lane_frac[i] >> 8) & 0xFF;
+        uint32_t p00 = lane_pix[i] & 0xFF;
+        uint32_t p01 = (lane_pix[i] >> 8) & 0xFF;
+        uint32_t p10 = (lane_pix[i] >> 16) & 0xFF;
+        uint32_t p11 = (lane_pix[i] >> 24) & 0xFF;
+        
+        printf("  L%u: src(%u,%u) frac(.%02X,.%02X) px[%3u %3u %3u %3u]\n",
+               i, src_x, src_y, fx, fy, p00, p01, p10, p11);
     }
 }
 
@@ -408,57 +362,40 @@ static void dsa_print_debug(void) {
  *===========================================================================*/
 
 static void cmd_help(void) {
-    printf("\n=== DSA Downscaler Console ===\n\n");
-    printf("Connection:\n");
-    printf("  connect              Connect to FPGA via JTAG\n");
-    printf("  disconnect           Close JTAG connection\n");
-    printf("\nConfiguration:\n");
-    printf("  set scale <f>        Set scale factor (0.50, 0.55, ... 0.95, 1.00)\n");
-    printf("  set mode <serial|simd>  Set processing mode (simd=4 lanes)\n");
-    printf("\nExecution:\n");
-    printf("  run                  Start processing (continuous)\n");
-    printf("  step, s              Execute one step (starts stepping if not active)\n");
-    printf("  continue, c          Continue (disable stepping mode)\n");
-    printf("  reset                Reset accelerator\n");
-    printf("\nImage I/O:\n");
-    printf("  load <file.pgm>      Load input image\n");
-    printf("  verify               Verify input image was written correctly to SDRAM\n");
-    printf("  dump <file.pgm>      Dump output image\n");
-    printf("  compare [ref.pgm]    Compare FPGA output with C reference model\n");
-    printf("                       Optionally saves reference to ref.pgm\n");
-    printf("\nStatus:\n");
-    printf("  show config          Show configuration\n");
-    printf("  show perf            Show performance counters\n");
-    printf("  show debug           Show debug info (FSM state, coords, pixels)\n");
-    printf("  show all             Show everything\n");
-    printf("  read <addr>          Read CSR at offset (hex)\n");
-    printf("  write <addr> <val>   Write CSR (hex)\n");
-    printf("  mem <addr> [count]   Read memory bytes (hex dump, default 16)\n");
-    printf("\nGeneral:\n");
-    printf("  verbose <0|1>        Set verbose mode\n");
-    printf("  help                 Show this help\n");
-    printf("  quit, exit           Exit console\n\n");
+    printf("\n=== DSA Console ===\n");
+    printf("  connect / disconnect   JTAG connection\n");
+    printf("  load <file.pgm>        Load input image\n");
+    printf("  set scale <0.5-1.0>    Scale factor\n");
+    printf("  set mode <simd|serial> Processing mode\n");
+    printf("  set delay <us>         Step delay (0=fast clock)\n");
+    printf("  run                    Start processing\n");
+    printf("  step (s)               Single step\n");
+    printf("  continue (c)           Continue stepping\n");
+    printf("  reset                  Reset accelerator\n");
+    printf("  dump <file.pgm>        Save output\n");
+    printf("  compare [ref.pgm]      Validate vs C model\n");
+    printf("  show config|perf|debug Show status\n");
+    printf("  help / quit\n\n");
 }
 
 static void cmd_connect(void) {
     if (g_state.jtag.connected) {
-        printf("Already connected.\n");
+        printf("Already connected\n");
         return;
     }
 
-    printf("Connecting to FPGA...\n");
+    printf("Connecting...\n");
     int ret = jtag_open(&g_state.jtag);
     if (ret == JTAG_OK) {
-        printf("Connected successfully.\n");
-        
-        /* Read and verify version */
         uint32_t version;
         if (dsa_read_csr(CSR_VERSION, &version) == JTAG_OK) {
-            printf("DSA Version: %d.%d\n", 
+            printf("Connected (DSA v%d.%d)\n", 
                    (version >> 24) & 0xFF, (version >> 16) & 0xFF);
+        } else {
+            printf("Connected\n");
         }
     } else {
-        printf("Connection failed: %s\n", jtag_strerror(ret));
+        printf("Failed: %s\n", jtag_strerror(ret));
     }
 }
 
@@ -500,23 +437,123 @@ static void cmd_set(const char *param, const char *value) {
         uint32_t out_h = (uint32_t)(g_state.img_height * s);
         dsa_write_csr(CSR_OUT_WIDTH, out_w);
         dsa_write_csr(CSR_OUT_HEIGHT, out_h);
-        printf("Scale set to %.2f (Q8.8: 0x%04X), output: %ux%u\n", s, scale_q, out_w, out_h);
+        printf("Scale: %.2f -> %ux%u\n", s, out_w, out_h);
         
     } else if (strcmp(param, "mode") == 0) {
         if (strcmp(value, "simd") == 0 || strcmp(value, "SIMD") == 0) {
             g_state.mode = MODE_SIMD;
             dsa_write_csr(CSR_MODE, MODE_SIMD);
-            printf("Mode set to SIMD (4 lanes)\n");
+            printf("Mode: SIMD\n");
         } else if (strcmp(value, "serial") == 0 || strcmp(value, "SERIAL") == 0) {
             g_state.mode = MODE_SERIAL;
             dsa_write_csr(CSR_MODE, MODE_SERIAL);
-            printf("Mode set to SERIAL\n");
+            printf("Mode: Serial\n");
         } else {
-            printf("Invalid mode. Use 'simd' or 'serial'\n");
+            printf("Use 'simd' or 'serial'\n");
         }
+        
+    } else if (strcmp(param, "step_delay") == 0 || strcmp(param, "delay") == 0) {
+        int delay = atoi(value);
+        if (delay < 0) {
+            printf("Invalid delay\n");
+            return;
+        }
+        g_state.step_delay_us = (uint32_t)delay;
+        printf("Delay: %uus %s\n", g_state.step_delay_us, delay ? "(stepping)" : "(fast clock)");
         
     } else {
         printf("Unknown parameter: %s\n", param);
+    }
+}
+
+/* Cross-platform sleep function (microseconds) */
+static void sleep_us(uint32_t us) {
+#ifdef _WIN32
+    /* Windows doesn't have usleep, use busy-wait for short delays */
+    if (us == 0) return;
+    if (us >= 1000) {
+        Sleep(us / 1000);
+    } else {
+        /* For sub-millisecond, use QueryPerformanceCounter busy-wait */
+        LARGE_INTEGER freq, start, now;
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&start);
+        double target = (double)us / 1000000.0 * freq.QuadPart;
+        do {
+            QueryPerformanceCounter(&now);
+        } while ((now.QuadPart - start.QuadPart) < target);
+    }
+#else
+    usleep(us);
+#endif
+}
+
+/* Check if a key was pressed (non-blocking) */
+static int key_pressed(void) {
+#ifdef _WIN32
+    return _kbhit();
+#else
+    struct timeval tv = {0, 0};
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(0, &fds);
+    return select(1, &fds, NULL, NULL, &tv) > 0;
+#endif
+}
+
+/* Run stepping loop until done or user abort */
+static void stepping_loop(void) {
+    uint32_t out_w = 0, out_h = 0, progress = 0, status = 0;
+    dsa_read_csr(CSR_OUT_WIDTH, &out_w);
+    dsa_read_csr(CSR_OUT_HEIGHT, &out_h);
+    uint32_t total_pixels = out_w * out_h;
+    uint32_t last_progress = 0;
+    uint32_t step_count = 0;
+    
+    uint32_t batch_size = (g_state.step_delay_us >= 1000) ? 1 : 100;
+    uint32_t status_check_interval = 100;
+    
+    while (1) {
+        /* Send batch of step pulses */
+        for (uint32_t i = 0; i < batch_size; i++) {
+            dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
+            step_count++;
+            
+            if (g_state.step_delay_us >= 1000) {
+                sleep_us(g_state.step_delay_us);
+            }
+        }
+        
+        /* Check status periodically */
+        if (step_count % status_check_interval == 0 || step_count < 10) {
+            dsa_read_csr(CSR_STATUS, &status);
+            dsa_read_csr(CSR_PROGRESS, &progress);
+            
+            if (progress != last_progress) {
+                float pct = (total_pixels > 0) ? (100.0f * progress / total_pixels) : 0.0f;
+                printf("\rProgress: %u/%u (%.1f%%) - %u steps  ", 
+                       progress, total_pixels, pct, step_count);
+                fflush(stdout);
+                last_progress = progress;
+            }
+            
+            if (status & STATUS_DONE) {
+                printf("\nComplete! %u steps\n", step_count);
+                g_state.stepping_active = false;
+                break;
+            }
+            
+            if (key_pressed()) {
+#ifdef _WIN32
+                (void)_getch();
+#else
+                (void)getchar();
+#endif
+                printf("\nPaused at step %u (progress: %u/%u)\n", 
+                       step_count, progress, total_pixels);
+                break;
+            }
+        }
     }
 }
 
@@ -530,10 +567,21 @@ static void cmd_run(void) {
     dsa_write_csr(CSR_CTRL, CTRL_RESET);
     dsa_write_csr(CSR_CTRL, 0);
     
-    /* Normal run (use 'step' command for stepping mode) */
-    dsa_write_csr(CSR_CTRL, CTRL_START);
-    g_state.stepping_active = false;
-    printf("Started processing...\n");
+    /* If step_delay is configured, use controlled stepping to avoid metastability */
+    if (g_state.step_delay_us > 0) {
+        printf("Running (stepping mode, press key to pause)...\n");
+        
+        /* Start in stepping mode */
+        dsa_write_csr(CSR_CTRL, CTRL_START | CTRL_STEP_ENABLE);
+        g_state.stepping_active = true;
+        
+        stepping_loop();
+    } else {
+        /* Normal run with system clock (use 'step' command for stepping mode) */
+        dsa_write_csr(CSR_CTRL, CTRL_START);
+        g_state.stepping_active = false;
+        printf("Started processing (normal clock mode)...\n");
+    }
 }
 
 static void cmd_step(void) {
@@ -584,14 +632,14 @@ static void cmd_step(void) {
     uint32_t fsm_state = (dbg_fsm >> 16) & 0xF;
     uint32_t out_x = dbg_fsm & 0xFFFF;
     uint32_t out_y = dbg_out_y_reg & 0xFFFF;
-    uint32_t batch_size = (dbg_out_y_reg >> 16) & 0x7;
+    uint32_t num_lanes = (g_state.mode == MODE_SIMD) ? 4 : 1;
     
-    /* Print header with progress, output coords and batch info */
-    printf("[%u/%u] out(%u,%u) batch=%u | %s\n",
-           progress, total_pixels, out_x, out_y, batch_size, fsm_state_name(fsm_state));
+    /* Print header with progress, output coords */
+    printf("[%u/%u] out(%u,%u) | %s\n",
+           progress, total_pixels, out_x, out_y, fsm_state_name(fsm_state));
     
-    /* Print per-lane details for active lanes */
-    for (uint32_t i = 0; i < batch_size && i < 4; i++) {
+    /* Print per-lane details */
+    for (uint32_t i = 0; i < num_lanes; i++) {
         uint32_t src_x = lane_coord[i] & 0xFFFF;
         uint32_t src_y = (lane_coord[i] >> 16) & 0xFFFF;
         uint32_t frac_x = lane_frac[i] & 0xFF;
@@ -1059,11 +1107,11 @@ static void process_command(char *line) {
     } else if (strcmp(cmd, "step") == 0 || strcmp(cmd, "s") == 0) {
         cmd_step();
     } else if (strcmp(cmd, "continue") == 0 || strcmp(cmd, "c") == 0) {
-        if (g_state.jtag.connected) {
-            /* Disable stepping mode and continue */
-            dsa_write_csr(CSR_CTRL, 0); /* Clear step_enable */
-            g_state.stepping_active = false;
-            printf("Continuing (stepping disabled)...\n");
+        if (g_state.jtag.connected && g_state.stepping_active) {
+            printf("Continuing (press key to pause)...\n");
+            stepping_loop();
+        } else if (g_state.jtag.connected) {
+            printf("Not in stepping mode. Use 'run' to start.\n");
         }
     } else if (strcmp(cmd, "reset") == 0) {
         if (g_state.jtag.connected) {
@@ -1123,12 +1171,12 @@ int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     
-    printf("=== DSA Downscaler Console v1.0 ===\n");
-    printf("Type 'help' for available commands.\n\n");
+    printf("DSA Console v1.0 - Type 'help' for commands\n");
 
     /* Initialize defaults */
     g_state.scale = 0.5f;
     g_state.mode = MODE_SIMD;
+    g_state.step_delay_us = 1;  /* Default: 1us (JTAG overhead dominates, this just enables stepping mode) */
 
     /* Interactive loop */
     char line[512];
