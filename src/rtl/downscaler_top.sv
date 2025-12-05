@@ -74,6 +74,7 @@ module downscaler_top #(
     logic [31:0] fsm_errors;
     logic [63:0] fsm_perf_mem_reads;
     logic [63:0] fsm_perf_mem_writes;
+    logic [63:0] fsm_perf_pixel_reuse;
     
     //=======================================================
     // Internal Signals - Debug/Observability
@@ -175,6 +176,7 @@ module downscaler_top #(
         .acc_perf_flops      (active_perf_flops),
         .acc_perf_mem_reads  (fsm_perf_mem_reads),
         .acc_perf_mem_writes (fsm_perf_mem_writes),
+        .acc_perf_pixel_reuse(fsm_perf_pixel_reuse),
         
         // Stepping control
         .step_enable      (step_enable),
@@ -236,6 +238,7 @@ module downscaler_top #(
         .errors           (fsm_errors),
         .perf_mem_reads   (fsm_perf_mem_reads),
         .perf_mem_writes  (fsm_perf_mem_writes),
+        .perf_pixel_reuse (fsm_perf_pixel_reuse),
         
         // Debug outputs
         .dbg_fsm_state    (dbg_fsm_state),

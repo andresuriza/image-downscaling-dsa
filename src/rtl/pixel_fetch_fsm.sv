@@ -40,6 +40,7 @@ module pixel_fetch_fsm #(
     output logic [31:0] errors,
     output logic [63:0] perf_mem_reads,
     output logic [63:0] perf_mem_writes,
+    output logic [63:0] perf_pixel_reuse,
     
     // Debug
     output logic [3:0]  dbg_fsm_state,
@@ -107,6 +108,12 @@ module pixel_fetch_fsm #(
     logic [1:0] fetch_phase;  // 0=p00, 1=p01, 2=p10, 3=p11
     logic       read_pending; // Track if a read request is in flight
     logic       write_pending; // Track if a write request is in flight
+    
+    // Pixel reuse state (for horizontal adjacency optimization)
+    logic [15:0] prev_src_x_int;  // Previous pixel's source X coordinate
+    logic [15:0] prev_src_y_int;  // Previous pixel's source Y coordinate  
+    logic        prev_valid;      // Previous pixel data is valid for reuse
+    logic        can_reuse;       // Current pixel can reuse previous data
     
     // Pipeline valid
     logic process_started;
@@ -182,6 +189,7 @@ module pixel_fetch_fsm #(
             errors <= 32'd0;
             perf_mem_reads <= 64'd0;
             perf_mem_writes <= 64'd0;
+            perf_pixel_reuse <= 64'd0;
             out_x <= 16'd0;
             out_y <= 16'd0;
             p00 <= 8'd0;
@@ -196,6 +204,9 @@ module pixel_fetch_fsm #(
             pixels_valid <= 1'b0;
             process_started <= 1'b0;
             process_countdown <= 2'd0;
+            prev_src_x_int <= 16'd0;
+            prev_src_y_int <= 16'd0;
+            prev_valid <= 1'b0;
         end else if (abort) begin
             state <= S_IDLE;
             busy <= 1'b0;
@@ -204,6 +215,7 @@ module pixel_fetch_fsm #(
             sdram_read <= 1'b0;
             sdram_write <= 1'b0;
             pixels_valid <= 1'b0;
+            prev_valid <= 1'b0;
         end else begin
             // Defaults (only for signals that should pulse)
             done <= 1'b0;
@@ -221,6 +233,8 @@ module pixel_fetch_fsm #(
                         progress <= 32'd0;
                         perf_mem_reads <= 64'd0;
                         perf_mem_writes <= 64'd0;
+                        perf_pixel_reuse <= 64'd0;
+                        prev_valid <= 1'b0;
                         // If stepping mode, wait for step_once before first compute
                         if (step_enable) begin
                             state <= S_WAIT_STEP;
@@ -232,15 +246,36 @@ module pixel_fetch_fsm #(
                 
                 S_COMPUTE: begin
                     // Coordinates computed combinationally, wait 1 cycle
-                    fetch_phase <= 2'd0;
+                    // Check if we can reuse pixels from previous output pixel
+                    // Reuse condition: same row (src_y unchanged) and src_x incremented by 1
+                    can_reuse <= prev_valid && 
+                                 (src_x_int == prev_src_x_int + 16'd1) && 
+                                 (src_y_int == prev_src_y_int);
+                    
                     read_pending <= 1'b0;
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
+                    
+                    if (prev_valid && 
+                        (src_x_int == prev_src_x_int + 16'd1) && 
+                        (src_y_int == prev_src_y_int)) begin
+                        // Reuse: p01->p00, p11->p10, only fetch new p01 and p11
+                        p00 <= p01;
+                        p10 <= p11;
+                        fetch_phase <= 2'd1;  // Start from phase 1 (fetch p01)
+                        perf_pixel_reuse <= perf_pixel_reuse + 1;
+                    end else begin
+                        // No reuse: fetch all 4 pixels
+                        fetch_phase <= 2'd0;
+                    end
                     state <= S_FETCH;
                 end
                 
                 S_FETCH: begin
-                    // Fetch 4 neighbor pixels sequentially
+                    // Fetch neighbor pixels sequentially
+                    // With reuse: only fetch p01 (phase 1) and p11 (phase 3), skip p00 and p10
+                    // Without reuse: fetch all 4 (phases 0,1,2,3)
+                    //
                     // State machine for each pixel read:
                     //   1. Issue read request (sdram_read=1) with address
                     //   2. Wait for waitrequest to go low (request accepted)
@@ -287,7 +322,12 @@ module pixel_fetch_fsm #(
                             process_started <= 1'b0;
                             process_countdown <= 2'd3;  // Wait for pipeline
                         end else begin
-                            fetch_phase <= fetch_phase + 1;
+                            // When reusing, skip from phase 1 to phase 3 (skip p10 fetch)
+                            if (can_reuse && fetch_phase == 2'd1) begin
+                                fetch_phase <= 2'd3;  // Skip phase 2 (p10 already set from p11_prev)
+                            end else begin
+                                fetch_phase <= fetch_phase + 1;
+                            end
                         end
                     end
                 end
@@ -350,9 +390,15 @@ module pixel_fetch_fsm #(
                     sdram_write <= 1'b0;
                     progress <= progress + 1;
                     
+                    // Save current source coordinates for potential reuse
+                    prev_src_x_int <= src_x_int;
+                    prev_src_y_int <= src_y_int;
+                    prev_valid <= 1'b1;
+                    
                     // Advance coordinates
                     if (out_x + 1 >= out_width[15:0]) begin
                         out_x <= 16'd0;
+                        prev_valid <= 1'b0;  // Invalidate reuse on new row
                         if (out_y + 1 >= out_height[15:0]) begin
                             state <= S_DONE;
                         end else begin

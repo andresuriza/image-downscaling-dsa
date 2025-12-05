@@ -36,9 +36,17 @@
 #define CSR_MODE            0x020   /* Mode configuration */
 #define CSR_PROGRESS        0x024   /* Progress (RO) */
 
-/* Performance Counters (simplified - cycles only) */
+/* Performance Counters */
 #define CSR_PERF_CYCLES_LO  0x058
 #define CSR_PERF_CYCLES_HI  0x05C
+#define CSR_PERF_REUSE_LO   0x060   /* Pixel reuse count [31:0] */
+#define CSR_PERF_REUSE_HI   0x064   /* Pixel reuse count [63:32] */
+#define CSR_PERF_MEM_RD_LO  0x068   /* Memory reads [31:0] */
+#define CSR_PERF_MEM_RD_HI  0x06C   /* Memory reads [63:32] */
+#define CSR_PERF_MEM_WR_LO  0x070   /* Memory writes [31:0] */
+#define CSR_PERF_MEM_WR_HI  0x074   /* Memory writes [63:32] */
+#define CSR_PERF_FLOPS_LO   0x078   /* FLOPs count [31:0] */
+#define CSR_PERF_FLOPS_HI   0x07C   /* FLOPs count [63:32] */
 
 /* DMA Configuration */
 #define CSR_IMG_IN_ADDR     0x080

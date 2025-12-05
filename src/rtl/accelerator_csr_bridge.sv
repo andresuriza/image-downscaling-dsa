@@ -22,9 +22,17 @@
 `define CSR_IMG_IN_ADDR    12'h080   // Input image SDRAM address
 `define CSR_IMG_OUT_ADDR   12'h084   // Output image SDRAM address
 
-// Performance (simplified - just cycles)
+// Performance Counters
 `define CSR_PERF_CYCLES_LO 12'h058   // Cycle counter [31:0]
 `define CSR_PERF_CYCLES_HI 12'h05C   // Cycle counter [63:32]
+`define CSR_PERF_REUSE_LO  12'h060   // Pixel reuse count [31:0]
+`define CSR_PERF_REUSE_HI  12'h064   // Pixel reuse count [63:32]
+`define CSR_PERF_MEM_RD_LO 12'h068   // Memory reads [31:0]
+`define CSR_PERF_MEM_RD_HI 12'h06C   // Memory reads [63:32]
+`define CSR_PERF_MEM_WR_LO 12'h070   // Memory writes [31:0]
+`define CSR_PERF_MEM_WR_HI 12'h074   // Memory writes [63:32]
+`define CSR_PERF_FLOPS_LO  12'h078   // FLOPs count [31:0]
+`define CSR_PERF_FLOPS_HI  12'h07C   // FLOPs count [63:32]
 
 // Debug registers
 `define CSR_DBG_OUT_Y      12'h0E0   // Debug: out_y[15:0]
@@ -77,6 +85,7 @@ module accelerator_csr_bridge #(
     input  logic [63:0] acc_perf_flops,
     input  logic [63:0] acc_perf_mem_reads,
     input  logic [63:0] acc_perf_mem_writes,
+    input  logic [63:0] acc_perf_pixel_reuse,
     
     //=======================================================
     // Stepping Control (optional)
@@ -246,12 +255,20 @@ module accelerator_csr_bridge #(
                 `CSR_IMG_IN_ADDR:  avs_readdata = reg_img_in_addr;
                 `CSR_IMG_OUT_ADDR: avs_readdata = reg_img_out_addr;
                 
-                // Cycle counter only (simplified perf)
+                // Performance Counters
                 `CSR_PERF_CYCLES_LO: avs_readdata = cycle_counter[31:0];
                 `CSR_PERF_CYCLES_HI: avs_readdata = cycle_counter[63:32];
+                `CSR_PERF_REUSE_LO:  avs_readdata = acc_perf_pixel_reuse[31:0];
+                `CSR_PERF_REUSE_HI:  avs_readdata = acc_perf_pixel_reuse[63:32];
+                `CSR_PERF_MEM_RD_LO: avs_readdata = acc_perf_mem_reads[31:0];
+                `CSR_PERF_MEM_RD_HI: avs_readdata = acc_perf_mem_reads[63:32];
+                `CSR_PERF_MEM_WR_LO: avs_readdata = acc_perf_mem_writes[31:0];
+                `CSR_PERF_MEM_WR_HI: avs_readdata = acc_perf_mem_writes[63:32];
+                `CSR_PERF_FLOPS_LO:  avs_readdata = acc_perf_flops[31:0];
+                `CSR_PERF_FLOPS_HI:  avs_readdata = acc_perf_flops[63:32];
                 
-                // Version: v1.0 (simplified, lanes fixed at 4)
-                `CSR_VERSION:      avs_readdata = 32'h0001_0000;
+                // Version: v1.2 (added FLOPs counter)
+                `CSR_VERSION:      avs_readdata = 32'h0001_0200;
                 
                 // Debug registers (read-only)
                 `CSR_DBG_OUT_Y:    avs_readdata = {16'd0, dbg_out_y};

@@ -255,15 +255,30 @@ static void dsa_print_config(void) {
 
 static void dsa_print_perf(void) {
     uint32_t cycles_lo, cycles_hi, progress;
+    uint32_t reuse_lo, reuse_hi;
+    uint32_t mem_rd_lo, mem_rd_hi, mem_wr_lo, mem_wr_hi;
+    uint32_t flops_lo, flops_hi;
 
     if (dsa_read_csr(CSR_PERF_CYCLES_LO, &cycles_lo) != JTAG_OK ||
         dsa_read_csr(CSR_PERF_CYCLES_HI, &cycles_hi) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_REUSE_LO, &reuse_lo) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_REUSE_HI, &reuse_hi) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_MEM_RD_LO, &mem_rd_lo) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_MEM_RD_HI, &mem_rd_hi) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_MEM_WR_LO, &mem_wr_lo) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_MEM_WR_HI, &mem_wr_hi) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_FLOPS_LO, &flops_lo) != JTAG_OK ||
+        dsa_read_csr(CSR_PERF_FLOPS_HI, &flops_hi) != JTAG_OK ||
         dsa_read_csr(CSR_PROGRESS, &progress) != JTAG_OK) {
         printf("Error reading perf counters\n");
         return;
     }
 
     uint64_t cycles = ((uint64_t)cycles_hi << 32) | cycles_lo;
+    uint64_t pixel_reuse = ((uint64_t)reuse_hi << 32) | reuse_lo;
+    uint64_t mem_reads = ((uint64_t)mem_rd_hi << 32) | mem_rd_lo;
+    uint64_t mem_writes = ((uint64_t)mem_wr_hi << 32) | mem_wr_lo;
+    uint64_t flops = ((uint64_t)flops_hi << 32) | flops_lo;
 
     printf("=== Performance Counters ===\n");
     printf("Cycles:       %llu\n", (unsigned long long)cycles);
@@ -273,6 +288,40 @@ static void dsa_print_perf(void) {
         double cycles_per_pixel = (double)cycles / progress;
         printf("Cycles/Pixel: %.2f\n", cycles_per_pixel);
     }
+    
+    /* FLOPs counter - 8 FLOPs per pixel (bilinear interpolation) */
+    printf("\n--- Compute Performance ---\n");
+    printf("FLOPs:        %llu", (unsigned long long)flops);
+    if (cycles > 0) {
+        double flops_per_cycle = (double)flops / cycles;
+        printf(" (%.2f FLOPs/cycle)", flops_per_cycle);
+    }
+    printf("\n");
+    if (cycles > 0) {
+        /* Estimate MFLOPS at 50MHz */
+        double mflops = (double)flops / (double)cycles * 50.0;  /* 50MHz clock */
+        printf("Throughput:   %.2f MFLOPS @ 50MHz\n", mflops);
+    }
+    
+    /* Pixel reuse statistics */
+    printf("\n--- Memory Optimization ---\n");
+    printf("Pixel Reuse:  %llu", (unsigned long long)pixel_reuse);
+    if (progress > 0) {
+        double reuse_pct = 100.0 * pixel_reuse / progress;
+        printf(" / %u pixels (%.1f%%)", progress, reuse_pct);
+    }
+    printf("\n");
+    
+    /* Memory access counters */
+    printf("Memory Reads: %llu", (unsigned long long)mem_reads);
+    if (progress > 0) {
+        /* Without reuse: 4 reads per pixel. Calculate savings. */
+        uint64_t reads_without_reuse = (uint64_t)progress * 4;
+        double savings_pct = 100.0 * (1.0 - (double)mem_reads / reads_without_reuse);
+        printf(" (%.1f%% saved vs no reuse)", savings_pct);
+    }
+    printf("\n");
+    printf("Memory Writes: %llu\n", (unsigned long long)mem_writes);
     
     /* Estimate total time at 50MHz clock */
     uint32_t out_width = (uint32_t)(g_state.img_width * g_state.scale);
@@ -500,22 +549,47 @@ static void cmd_step(void) {
         dsa_write_csr(CSR_CTRL, 0);
         dsa_write_csr(CSR_CTRL, CTRL_START | CTRL_STEP_ENABLE);
         g_state.stepping_active = true;
-        printf("Started in stepping mode. Waiting at first pixel.\n");
+        printf("Stepping mode started.\n");
     } else {
         /* Already in stepping mode - send step pulse */
-        /* Keep STEP_ENABLE set, pulse STEP_ONCE */
         dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
-        printf("Stepped.\n");
     }
     
-    dsa_print_status();
-    dsa_print_debug();
+    /* Read essential debug info */
+    uint32_t dbg_fsm = 0, dbg_out_y_reg = 0, dbg_coord = 0, dbg_frac = 0;
+    uint32_t dbg_pixels = 0, progress = 0, out_w = 0, out_h = 0, status = 0;
+    
+    dsa_read_csr(CSR_STATUS, &status);
+    dsa_read_csr(CSR_PROGRESS, &progress);
+    dsa_read_csr(CSR_OUT_WIDTH, &out_w);
+    dsa_read_csr(CSR_OUT_HEIGHT, &out_h);
+    dsa_read_csr(CSR_DBG_FSM, &dbg_fsm);
+    dsa_read_csr(CSR_DBG_OUT_Y, &dbg_out_y_reg);
+    dsa_read_csr(CSR_DBG_COORD, &dbg_coord);
+    dsa_read_csr(CSR_DBG_FRAC, &dbg_frac);
+    dsa_read_csr(CSR_DBG_PIXELS, &dbg_pixels);
+    
+    uint32_t total_pixels = out_w * out_h;
+    uint32_t fsm_state = (dbg_fsm >> 16) & 0xF;
+    uint32_t out_x = dbg_fsm & 0xFFFF;
+    uint32_t out_y = dbg_out_y_reg & 0xFFFF;
+    uint32_t src_x = dbg_coord & 0xFFFF;
+    uint32_t src_y = (dbg_coord >> 16) & 0xFFFF;
+    uint32_t frac_x = dbg_frac & 0xFF;
+    uint32_t frac_y = (dbg_frac >> 8) & 0xFF;
+    uint32_t p00 = dbg_pixels & 0xFF;
+    uint32_t p01 = (dbg_pixels >> 8) & 0xFF;
+    uint32_t p10 = (dbg_pixels >> 16) & 0xFF;
+    uint32_t p11 = (dbg_pixels >> 24) & 0xFF;
+    
+    /* Compact one-line display */
+    printf("[%u/%u] out(%u,%u) <- src(%u,%u)+(.%02X,.%02X) | p[%3u %3u %3u %3u] | %s\n",
+           progress, total_pixels, out_x, out_y, src_x, src_y, frac_x, frac_y,
+           p00, p01, p10, p11, fsm_state_name(fsm_state));
     
     /* Check if done */
-    uint32_t status = 0;
-    dsa_read_csr(CSR_STATUS, &status);
     if (status & STATUS_DONE) {
-        printf("Processing complete!\n");
+        printf("Done!\n");
         g_state.stepping_active = false;
     }
 }
