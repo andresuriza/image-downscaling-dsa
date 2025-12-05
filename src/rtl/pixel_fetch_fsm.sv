@@ -1,20 +1,3 @@
-//=======================================================
-// Pixel Fetch FSM with SIMD Support
-// 
-// Processes 4 pixels per batch in SIMD mode (MODE_SIMD)
-// Falls back to 1 pixel at a time in serial mode (MODE_SERIAL)
-//
-// SIMD batch strategy:
-//   - Process 4 consecutive output pixels (same row)
-//   - For small scale factors, source pixels often share rows
-//   - Fetch unique source rows, then distribute to lanes
-//   - Write 4 results per batch
-//
-// Memory optimization:
-//   - Horizontal pixel reuse between batches
-//   - Batch internal: pixels may share source coordinates
-//=======================================================
-
 module pixel_fetch_fsm #(
     parameter int LANES      = 4,
     parameter int Q          = 8,
@@ -53,14 +36,14 @@ module pixel_fetch_fsm #(
     output logic [15:0] dbg_out_y,
     output logic [2:0]  dbg_batch_size,
     
-    // Debug - per lane (lane 0)
+    // Debug 
     output logic [15:0] dbg_src_x_int,
     output logic [15:0] dbg_src_y_int,
     output logic [Q-1:0] dbg_frac_x,
     output logic [Q-1:0] dbg_frac_y,
     output logic [7:0]  dbg_p00, dbg_p01, dbg_p10, dbg_p11,
     
-    // Debug - lanes 1-3 (packed as arrays)
+    // Debug - lanes 1-3 (empaquetados como arrays)
     output logic [15:0] dbg_lane1_src_x, dbg_lane1_src_y,
     output logic [7:0]  dbg_lane1_frac_x, dbg_lane1_frac_y,
     output logic [7:0]  dbg_lane1_p00, dbg_lane1_p01, dbg_lane1_p10, dbg_lane1_p11,
@@ -83,7 +66,6 @@ module pixel_fetch_fsm #(
     input  logic        sdram_readdatavalid,
     output logic [1:0]  sdram_byteenable,
     
-    // Downscaler Interface
     output logic [LANES*8-1:0] p00_packed,
     output logic [LANES*8-1:0] p01_packed,
     output logic [LANES*8-1:0] p10_packed,
@@ -95,32 +77,27 @@ module pixel_fetch_fsm #(
     input  logic               result_valid
 );
 
-    //=======================================================
-    // FSM States
-    //=======================================================
+    // Estados FSM
     typedef enum logic [3:0] {
         S_IDLE       = 4'd0,
-        S_COMPUTE    = 4'd1,   // Compute source coords for batch
-        S_FETCH      = 4'd2,   // Fetch pixels from SDRAM
-        S_PROCESS    = 4'd3,   // Wait for downscaler
-        S_WRITE      = 4'd4,   // Write result(s)
-        S_NEXT       = 4'd5,   // Advance to next batch
+        S_COMPUTE    = 4'd1,   
+        S_FETCH      = 4'd2, 
+        S_PROCESS    = 4'd3,  
+        S_WRITE      = 4'd4, 
+        S_NEXT       = 4'd5,   
         S_DONE       = 4'd6,
-        S_WAIT_STEP  = 4'd7    // Wait for step_once when stepping
+        S_WAIT_STEP  = 4'd7 
     } state_t;
     
     state_t state;
     
-    // Mode constants
     localparam MODE_SIMD   = 2'd0;
     localparam MODE_SERIAL = 2'd1;
     
-    //=======================================================
-    // Batch processing - up to 4 pixels per batch
-    //=======================================================
-    logic [15:0] out_x, out_y;           // Current output position
-    logic [2:0]  batch_size;             // Actual pixels in current batch (1-4)
-    logic [2:0]  batch_idx;              // Current index within batch for writes
+    // Coordenadas de salida e imagen fuente
+    logic [15:0] out_x, out_y;    
+    logic [2:0]  batch_size; 
+    logic [2:0]  batch_idx;     
     
     // Per-lane source coordinates (computed in S_COMPUTE)
     logic [15:0] lane_src_x_int [LANES-1:0];
@@ -213,11 +190,10 @@ module pixel_fetch_fsm #(
     // Write address for current batch index
     assign addr_write = img_out_addr + {16'd0, out_y} * out_width + {16'd0, out_x} + {29'd0, batch_idx};
     
-    //=======================================================
-    // Main FSM
-    //=======================================================
+   //  Máquina de estados principal
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            // Estado inicial del hardware
             state <= S_IDLE;
             busy <= 1'b0;
             done <= 1'b0;
@@ -256,6 +232,7 @@ module pixel_fetch_fsm #(
                 lane_p11[i] <= 8'd0;
             end
         end else if (abort) begin
+            // Cancelar operación actual
             state <= S_IDLE;
             busy <= 1'b0;
             read_pending <= 1'b0;
@@ -269,6 +246,7 @@ module pixel_fetch_fsm #(
             
             case (state)
                 S_IDLE: begin
+                    // Espera al inicio
                     busy <= 1'b0;
                     pixels_valid <= 1'b0;
                     sdram_read <= 1'b0;
@@ -282,18 +260,17 @@ module pixel_fetch_fsm #(
                         perf_mem_writes <= 64'd0;
                         perf_pixel_reuse <= 64'd0;
                         prev_valid <= 1'b0;
-                        // Always go to S_COMPUTE first to calculate batch_size
+             
                         state <= S_COMPUTE;
                     end
                 end
                 
+                // Coordenadas ya están listas combinacionalmente, pasar a lectura
                 S_COMPUTE: begin
-                    // Determine batch size based on mode and remaining pixels
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
                     read_pending <= 1'b0;
                     
-                    // Calculate how many pixels remain in this row
                     if (mode == MODE_SERIAL) begin
                         // Serial mode: 1 pixel at a time
                         batch_size <= 3'd1;
@@ -354,11 +331,8 @@ module pixel_fetch_fsm #(
                     state <= S_FETCH;
                 end
                 
-                S_FETCH: begin
-                    // Fetch pixels for each valid lane
-                    // For each lane, fetch p00, p01, p10, p11
-                    // Optimize: check if current lane can reuse from previous lane
-                    
+                // Leer 4 pixeles vecinos desde SDRAM
+                S_FETCH: begin        
                     if (fetch_lane >= batch_size) begin
                         // All lanes fetched
                         state <= S_PROCESS;
@@ -469,11 +443,11 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
+                 // Enviar pixeles al módulo de downscaling
                 S_PROCESS: begin
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
                     
-                    // Pack data for all lanes
                     for (int i = 0; i < LANES; i++) begin
                         p00_packed[i*8 +: 8] <= lane_p00[i];
                         p01_packed[i*8 +: 8] <= lane_p01[i];
@@ -500,8 +474,8 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
+                // Escribir pixel final en SDRAM
                 S_WRITE: begin
-                    // Write results for all valid lanes
                     if (batch_idx < batch_size && lane_valid[batch_idx]) begin
                         if (!write_pending) begin
                             sdram_write <= 1'b1;
@@ -526,23 +500,22 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
+                // Avanzar a la siguiente coordenada de salida
                 S_NEXT: begin
                     write_pending <= 1'b0;
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
                     progress <= progress + {29'd0, batch_size};
                     
-                    // Save last lane's data for potential reuse in next batch
                     prev_src_x_int <= lane_src_x_int[batch_size-1];
                     prev_src_y_int <= lane_src_y_int[batch_size-1];
                     prev_p01 <= lane_p01[batch_size-1];
                     prev_p11 <= lane_p11[batch_size-1];
                     prev_valid <= 1'b1;
                     
-                    // Advance output position by batch_size
                     if (out_x + {13'd0, batch_size} >= out_width[15:0]) begin
                         out_x <= 16'd0;
-                        prev_valid <= 1'b0;  // New row, invalidate reuse
+                        prev_valid <= 1'b0; 
                         if (out_y + 1 >= out_height[15:0]) begin
                             state <= S_DONE;
                         end else begin
@@ -572,6 +545,7 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
+                // Finalización del procesamiento
                 S_DONE: begin
                     done <= 1'b1;
                     busy <= 1'b0;
@@ -589,9 +563,7 @@ module pixel_fetch_fsm #(
         end
     end
     
-    //=======================================================
-    // Debug outputs - common
-    //=======================================================
+    // Señales de depuración
     assign dbg_fsm_state = state;
     assign dbg_out_x = out_x;
     assign dbg_out_y = out_y;
