@@ -54,10 +54,21 @@
 
 /* Debug Registers (read-only) */
 #define CSR_DBG_FSM         0x0F0   /* [19:16]=FSM state, [15:0]=out_x */
-#define CSR_DBG_OUT_Y       0x0E0   /* [15:0]=out_y */
-#define CSR_DBG_COORD       0x0F4   /* [31:16]=src_y_int, [15:0]=src_x_int */
-#define CSR_DBG_FRAC        0x0F8   /* [19:16]=lane, [15:8]=frac_y, [7:0]=frac_x */
-#define CSR_DBG_PIXELS      0x0E4   /* [31:24]=p11, [23:16]=p10, [15:8]=p01, [7:0]=p00 */
+#define CSR_DBG_OUT_Y       0x0E0   /* [15:0]=out_y, [18:16]=batch_size */
+#define CSR_DBG_COORD       0x0F4   /* [31:16]=src_y_int, [15:0]=src_x_int (lane 0) */
+#define CSR_DBG_FRAC        0x0F8   /* [15:8]=frac_y, [7:0]=frac_x (lane 0) */
+#define CSR_DBG_PIXELS      0x0E4   /* [31:24]=p11, [23:16]=p10, [15:8]=p01, [7:0]=p00 (lane 0) */
+
+/* Debug Registers for lanes 1-3 */
+#define CSR_DBG_LANE1_COORD 0x0A0   /* [31:16]=src_y_int, [15:0]=src_x_int (lane 1) */
+#define CSR_DBG_LANE1_FRAC  0x0A4   /* [15:8]=frac_y, [7:0]=frac_x (lane 1) */
+#define CSR_DBG_LANE1_PIX   0x0A8   /* [31:24]=p11, [23:16]=p10, [15:8]=p01, [7:0]=p00 (lane 1) */
+#define CSR_DBG_LANE2_COORD 0x0B0   /* lane 2 */
+#define CSR_DBG_LANE2_FRAC  0x0B4
+#define CSR_DBG_LANE2_PIX   0x0B8
+#define CSR_DBG_LANE3_COORD 0x0C0   /* lane 3 */
+#define CSR_DBG_LANE3_FRAC  0x0C4
+#define CSR_DBG_LANE3_PIX   0x0C8
 
 /* Version */
 #define CSR_VERSION         0x0FC

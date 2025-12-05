@@ -556,8 +556,7 @@ static void cmd_step(void) {
     }
     
     /* Read essential debug info */
-    uint32_t dbg_fsm = 0, dbg_out_y_reg = 0, dbg_coord = 0, dbg_frac = 0;
-    uint32_t dbg_pixels = 0, progress = 0, out_w = 0, out_h = 0, status = 0;
+    uint32_t dbg_fsm = 0, dbg_out_y_reg = 0, progress = 0, out_w = 0, out_h = 0, status = 0;
     
     dsa_read_csr(CSR_STATUS, &status);
     dsa_read_csr(CSR_PROGRESS, &progress);
@@ -565,27 +564,46 @@ static void cmd_step(void) {
     dsa_read_csr(CSR_OUT_HEIGHT, &out_h);
     dsa_read_csr(CSR_DBG_FSM, &dbg_fsm);
     dsa_read_csr(CSR_DBG_OUT_Y, &dbg_out_y_reg);
-    dsa_read_csr(CSR_DBG_COORD, &dbg_coord);
-    dsa_read_csr(CSR_DBG_FRAC, &dbg_frac);
-    dsa_read_csr(CSR_DBG_PIXELS, &dbg_pixels);
+    
+    /* Read per-lane debug info */
+    uint32_t lane_coord[4], lane_frac[4], lane_pix[4];
+    dsa_read_csr(CSR_DBG_COORD, &lane_coord[0]);
+    dsa_read_csr(CSR_DBG_FRAC, &lane_frac[0]);
+    dsa_read_csr(CSR_DBG_PIXELS, &lane_pix[0]);
+    dsa_read_csr(CSR_DBG_LANE1_COORD, &lane_coord[1]);
+    dsa_read_csr(CSR_DBG_LANE1_FRAC, &lane_frac[1]);
+    dsa_read_csr(CSR_DBG_LANE1_PIX, &lane_pix[1]);
+    dsa_read_csr(CSR_DBG_LANE2_COORD, &lane_coord[2]);
+    dsa_read_csr(CSR_DBG_LANE2_FRAC, &lane_frac[2]);
+    dsa_read_csr(CSR_DBG_LANE2_PIX, &lane_pix[2]);
+    dsa_read_csr(CSR_DBG_LANE3_COORD, &lane_coord[3]);
+    dsa_read_csr(CSR_DBG_LANE3_FRAC, &lane_frac[3]);
+    dsa_read_csr(CSR_DBG_LANE3_PIX, &lane_pix[3]);
     
     uint32_t total_pixels = out_w * out_h;
     uint32_t fsm_state = (dbg_fsm >> 16) & 0xF;
     uint32_t out_x = dbg_fsm & 0xFFFF;
     uint32_t out_y = dbg_out_y_reg & 0xFFFF;
-    uint32_t src_x = dbg_coord & 0xFFFF;
-    uint32_t src_y = (dbg_coord >> 16) & 0xFFFF;
-    uint32_t frac_x = dbg_frac & 0xFF;
-    uint32_t frac_y = (dbg_frac >> 8) & 0xFF;
-    uint32_t p00 = dbg_pixels & 0xFF;
-    uint32_t p01 = (dbg_pixels >> 8) & 0xFF;
-    uint32_t p10 = (dbg_pixels >> 16) & 0xFF;
-    uint32_t p11 = (dbg_pixels >> 24) & 0xFF;
+    uint32_t batch_size = (dbg_out_y_reg >> 16) & 0x7;
     
-    /* Compact one-line display */
-    printf("[%u/%u] out(%u,%u) <- src(%u,%u)+(.%02X,.%02X) | p[%3u %3u %3u %3u] | %s\n",
-           progress, total_pixels, out_x, out_y, src_x, src_y, frac_x, frac_y,
-           p00, p01, p10, p11, fsm_state_name(fsm_state));
+    /* Print header with progress, output coords and batch info */
+    printf("[%u/%u] out(%u,%u) batch=%u | %s\n",
+           progress, total_pixels, out_x, out_y, batch_size, fsm_state_name(fsm_state));
+    
+    /* Print per-lane details for active lanes */
+    for (uint32_t i = 0; i < batch_size && i < 4; i++) {
+        uint32_t src_x = lane_coord[i] & 0xFFFF;
+        uint32_t src_y = (lane_coord[i] >> 16) & 0xFFFF;
+        uint32_t frac_x = lane_frac[i] & 0xFF;
+        uint32_t frac_y = (lane_frac[i] >> 8) & 0xFF;
+        uint32_t p00 = lane_pix[i] & 0xFF;
+        uint32_t p01 = (lane_pix[i] >> 8) & 0xFF;
+        uint32_t p10 = (lane_pix[i] >> 16) & 0xFF;
+        uint32_t p11 = (lane_pix[i] >> 24) & 0xFF;
+        
+        printf("  L%u: src(%u,%u)+(.%02X,.%02X) p[%3u %3u %3u %3u]\n",
+               i, src_x, src_y, frac_x, frac_y, p00, p01, p10, p11);
+    }
     
     /* Check if done */
     if (status & STATUS_DONE) {

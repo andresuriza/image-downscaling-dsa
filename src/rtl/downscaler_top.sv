@@ -82,6 +82,9 @@ module downscaler_top #(
     logic [3:0]           dbg_fsm_state;
     logic [15:0]          dbg_out_x;
     logic [15:0]          dbg_out_y;
+    logic [2:0]           dbg_batch_size;
+    
+    // Lane 0
     logic [15:0]          dbg_src_x_int;
     logic [15:0]          dbg_src_y_int;
     logic [Q-1:0]         dbg_frac_x;
@@ -90,8 +93,21 @@ module downscaler_top #(
     logic [PIXEL_WIDTH-1:0] dbg_p01;
     logic [PIXEL_WIDTH-1:0] dbg_p10;
     logic [PIXEL_WIDTH-1:0] dbg_p11;
-    logic [PIXEL_WIDTH-1:0] dbg_out_pixel;
-    logic [3:0]           dbg_lane_index;
+    
+    // Lane 1
+    logic [15:0]          dbg_lane1_src_x, dbg_lane1_src_y;
+    logic [7:0]           dbg_lane1_frac_x, dbg_lane1_frac_y;
+    logic [7:0]           dbg_lane1_p00, dbg_lane1_p01, dbg_lane1_p10, dbg_lane1_p11;
+    
+    // Lane 2
+    logic [15:0]          dbg_lane2_src_x, dbg_lane2_src_y;
+    logic [7:0]           dbg_lane2_frac_x, dbg_lane2_frac_y;
+    logic [7:0]           dbg_lane2_p00, dbg_lane2_p01, dbg_lane2_p10, dbg_lane2_p11;
+    
+    // Lane 3
+    logic [15:0]          dbg_lane3_src_x, dbg_lane3_src_y;
+    logic [7:0]           dbg_lane3_frac_x, dbg_lane3_frac_y;
+    logic [7:0]           dbg_lane3_p00, dbg_lane3_p01, dbg_lane3_p10, dbg_lane3_p11;
     
     //=======================================================
     // Internal Signals - FSM to SIMD interface
@@ -186,10 +202,13 @@ module downscaler_top #(
         .img_in_addr      (img_in_addr),
         .img_out_addr     (img_out_addr),
         
-        // Debug inputs
+        // Debug inputs - common
         .dbg_fsm_state    (dbg_fsm_state),
         .dbg_out_x        (dbg_out_x),
         .dbg_out_y        (dbg_out_y),
+        .dbg_batch_size   (dbg_batch_size),
+        
+        // Debug inputs - lane 0
         .dbg_src_x_int    (dbg_src_x_int),
         .dbg_src_y_int    (dbg_src_y_int),
         .dbg_frac_x       (dbg_frac_x),
@@ -198,8 +217,36 @@ module downscaler_top #(
         .dbg_p01          (dbg_p01),
         .dbg_p10          (dbg_p10),
         .dbg_p11          (dbg_p11),
-        .dbg_out_pixel    (dbg_out_pixel),
-        .dbg_lane_index   (dbg_lane_index)
+        
+        // Debug inputs - lane 1
+        .dbg_lane1_src_x  (dbg_lane1_src_x),
+        .dbg_lane1_src_y  (dbg_lane1_src_y),
+        .dbg_lane1_frac_x (dbg_lane1_frac_x),
+        .dbg_lane1_frac_y (dbg_lane1_frac_y),
+        .dbg_lane1_p00    (dbg_lane1_p00),
+        .dbg_lane1_p01    (dbg_lane1_p01),
+        .dbg_lane1_p10    (dbg_lane1_p10),
+        .dbg_lane1_p11    (dbg_lane1_p11),
+        
+        // Debug inputs - lane 2
+        .dbg_lane2_src_x  (dbg_lane2_src_x),
+        .dbg_lane2_src_y  (dbg_lane2_src_y),
+        .dbg_lane2_frac_x (dbg_lane2_frac_x),
+        .dbg_lane2_frac_y (dbg_lane2_frac_y),
+        .dbg_lane2_p00    (dbg_lane2_p00),
+        .dbg_lane2_p01    (dbg_lane2_p01),
+        .dbg_lane2_p10    (dbg_lane2_p10),
+        .dbg_lane2_p11    (dbg_lane2_p11),
+        
+        // Debug inputs - lane 3
+        .dbg_lane3_src_x  (dbg_lane3_src_x),
+        .dbg_lane3_src_y  (dbg_lane3_src_y),
+        .dbg_lane3_frac_x (dbg_lane3_frac_x),
+        .dbg_lane3_frac_y (dbg_lane3_frac_y),
+        .dbg_lane3_p00    (dbg_lane3_p00),
+        .dbg_lane3_p01    (dbg_lane3_p01),
+        .dbg_lane3_p10    (dbg_lane3_p10),
+        .dbg_lane3_p11    (dbg_lane3_p11)
     );
     
     //=======================================================
@@ -240,10 +287,13 @@ module downscaler_top #(
         .perf_mem_writes  (fsm_perf_mem_writes),
         .perf_pixel_reuse (fsm_perf_pixel_reuse),
         
-        // Debug outputs
+        // Debug outputs - common
         .dbg_fsm_state    (dbg_fsm_state),
         .dbg_out_x        (dbg_out_x),
         .dbg_out_y        (dbg_out_y),
+        .dbg_batch_size   (dbg_batch_size),
+        
+        // Debug outputs - lane 0
         .dbg_src_x_int    (dbg_src_x_int),
         .dbg_src_y_int    (dbg_src_y_int),
         .dbg_frac_x       (dbg_frac_x),
@@ -252,8 +302,36 @@ module downscaler_top #(
         .dbg_p01          (dbg_p01),
         .dbg_p10          (dbg_p10),
         .dbg_p11          (dbg_p11),
-        .dbg_out_pixel    (dbg_out_pixel),
-        .dbg_lane_index   (dbg_lane_index),
+        
+        // Debug outputs - lane 1
+        .dbg_lane1_src_x  (dbg_lane1_src_x),
+        .dbg_lane1_src_y  (dbg_lane1_src_y),
+        .dbg_lane1_frac_x (dbg_lane1_frac_x),
+        .dbg_lane1_frac_y (dbg_lane1_frac_y),
+        .dbg_lane1_p00    (dbg_lane1_p00),
+        .dbg_lane1_p01    (dbg_lane1_p01),
+        .dbg_lane1_p10    (dbg_lane1_p10),
+        .dbg_lane1_p11    (dbg_lane1_p11),
+        
+        // Debug outputs - lane 2
+        .dbg_lane2_src_x  (dbg_lane2_src_x),
+        .dbg_lane2_src_y  (dbg_lane2_src_y),
+        .dbg_lane2_frac_x (dbg_lane2_frac_x),
+        .dbg_lane2_frac_y (dbg_lane2_frac_y),
+        .dbg_lane2_p00    (dbg_lane2_p00),
+        .dbg_lane2_p01    (dbg_lane2_p01),
+        .dbg_lane2_p10    (dbg_lane2_p10),
+        .dbg_lane2_p11    (dbg_lane2_p11),
+        
+        // Debug outputs - lane 3
+        .dbg_lane3_src_x  (dbg_lane3_src_x),
+        .dbg_lane3_src_y  (dbg_lane3_src_y),
+        .dbg_lane3_frac_x (dbg_lane3_frac_x),
+        .dbg_lane3_frac_y (dbg_lane3_frac_y),
+        .dbg_lane3_p00    (dbg_lane3_p00),
+        .dbg_lane3_p01    (dbg_lane3_p01),
+        .dbg_lane3_p10    (dbg_lane3_p10),
+        .dbg_lane3_p11    (dbg_lane3_p11),
         
         // SDRAM master interface
         .sdram_address    (sdram_address),

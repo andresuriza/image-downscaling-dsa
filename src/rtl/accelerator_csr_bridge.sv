@@ -34,12 +34,23 @@
 `define CSR_PERF_FLOPS_LO  12'h078   // FLOPs count [31:0]
 `define CSR_PERF_FLOPS_HI  12'h07C   // FLOPs count [63:32]
 
-// Debug registers
-`define CSR_DBG_OUT_Y      12'h0E0   // Debug: out_y[15:0]
+// Debug registers - lane 0
+`define CSR_DBG_OUT_Y      12'h0E0   // Debug: [18:16]=batch_size, [15:0]=out_y
 `define CSR_DBG_PIXELS     12'h0E4   // Debug: p11[31:24], p10[23:16], p01[15:8], p00[7:0]
-`define CSR_DBG_FSM        12'h0F0   // Debug: FSM state [3:0], out_x[15:0], out_y[15:0]
-`define CSR_DBG_COORD      12'h0F4   // Debug: src_x_int[15:0], src_y_int[15:0]
-`define CSR_DBG_FRAC       12'h0F8   // Debug: frac_x[7:0], frac_y[7:0], lane[3:0]
+`define CSR_DBG_FSM        12'h0F0   // Debug: FSM state [19:16], out_x[15:0]
+`define CSR_DBG_COORD      12'h0F4   // Debug: src_y_int[31:16], src_x_int[15:0]
+`define CSR_DBG_FRAC       12'h0F8   // Debug: frac_y[15:8], frac_x[7:0]
+
+// Debug registers - lanes 1-3
+`define CSR_DBG_LANE1_COORD 12'h0A0  // Lane 1: src_y[31:16], src_x[15:0]
+`define CSR_DBG_LANE1_FRAC  12'h0A4  // Lane 1: frac_y[15:8], frac_x[7:0]
+`define CSR_DBG_LANE1_PIX   12'h0A8  // Lane 1: p11[31:24], p10[23:16], p01[15:8], p00[7:0]
+`define CSR_DBG_LANE2_COORD 12'h0B0  // Lane 2: src_y[31:16], src_x[15:0]
+`define CSR_DBG_LANE2_FRAC  12'h0B4  // Lane 2: frac_y[15:8], frac_x[7:0]
+`define CSR_DBG_LANE2_PIX   12'h0B8  // Lane 2: p11[31:24], p10[23:16], p01[15:8], p00[7:0]
+`define CSR_DBG_LANE3_COORD 12'h0C0  // Lane 3: src_y[31:16], src_x[15:0]
+`define CSR_DBG_LANE3_FRAC  12'h0C4  // Lane 3: frac_y[15:8], frac_x[7:0]
+`define CSR_DBG_LANE3_PIX   12'h0C8  // Lane 3: p11[31:24], p10[23:16], p01[15:8], p00[7:0]
 
 // Version
 `define CSR_VERSION        12'h0FC   // Version register (RO)
@@ -105,16 +116,47 @@ module accelerator_csr_bridge #(
     input  logic [3:0]    dbg_fsm_state,
     input  logic [15:0]   dbg_out_x,
     input  logic [15:0]   dbg_out_y,
+    input  logic [2:0]    dbg_batch_size,
+    
+    // Lane 0
     input  logic [15:0]   dbg_src_x_int,
     input  logic [15:0]   dbg_src_y_int,
     input  logic [Q-1:0]  dbg_frac_x,
     input  logic [Q-1:0]  dbg_frac_y,
-    input  logic [7:0]    dbg_p00,      // PIXEL_WIDTH hardcoded for debug interface
+    input  logic [7:0]    dbg_p00,
     input  logic [7:0]    dbg_p01,
     input  logic [7:0]    dbg_p10,
     input  logic [7:0]    dbg_p11,
-    input  logic [7:0]    dbg_out_pixel,
-    input  logic [3:0]    dbg_lane_index
+    
+    // Lane 1
+    input  logic [15:0]   dbg_lane1_src_x,
+    input  logic [15:0]   dbg_lane1_src_y,
+    input  logic [7:0]    dbg_lane1_frac_x,
+    input  logic [7:0]    dbg_lane1_frac_y,
+    input  logic [7:0]    dbg_lane1_p00,
+    input  logic [7:0]    dbg_lane1_p01,
+    input  logic [7:0]    dbg_lane1_p10,
+    input  logic [7:0]    dbg_lane1_p11,
+    
+    // Lane 2
+    input  logic [15:0]   dbg_lane2_src_x,
+    input  logic [15:0]   dbg_lane2_src_y,
+    input  logic [7:0]    dbg_lane2_frac_x,
+    input  logic [7:0]    dbg_lane2_frac_y,
+    input  logic [7:0]    dbg_lane2_p00,
+    input  logic [7:0]    dbg_lane2_p01,
+    input  logic [7:0]    dbg_lane2_p10,
+    input  logic [7:0]    dbg_lane2_p11,
+    
+    // Lane 3
+    input  logic [15:0]   dbg_lane3_src_x,
+    input  logic [15:0]   dbg_lane3_src_y,
+    input  logic [7:0]    dbg_lane3_frac_x,
+    input  logic [7:0]    dbg_lane3_frac_y,
+    input  logic [7:0]    dbg_lane3_p00,
+    input  logic [7:0]    dbg_lane3_p01,
+    input  logic [7:0]    dbg_lane3_p10,
+    input  logic [7:0]    dbg_lane3_p11
 );
 
     //=======================================================
@@ -267,15 +309,30 @@ module accelerator_csr_bridge #(
                 `CSR_PERF_FLOPS_LO:  avs_readdata = acc_perf_flops[31:0];
                 `CSR_PERF_FLOPS_HI:  avs_readdata = acc_perf_flops[63:32];
                 
-                // Version: v1.2 (added FLOPs counter)
-                `CSR_VERSION:      avs_readdata = 32'h0001_0200;
+                // Version: v1.3 (SIMD batch mode with per-lane debug)
+                `CSR_VERSION:      avs_readdata = 32'h0001_0300;
                 
-                // Debug registers (read-only)
-                `CSR_DBG_OUT_Y:    avs_readdata = {16'd0, dbg_out_y};
+                // Debug registers - lane 0 (read-only)
+                `CSR_DBG_OUT_Y:    avs_readdata = {13'd0, dbg_batch_size, dbg_out_y};
                 `CSR_DBG_PIXELS:   avs_readdata = {dbg_p11, dbg_p10, dbg_p01, dbg_p00};
                 `CSR_DBG_FSM:      avs_readdata = {12'd0, dbg_fsm_state, dbg_out_x};
                 `CSR_DBG_COORD:    avs_readdata = {dbg_src_y_int, dbg_src_x_int};
-                `CSR_DBG_FRAC:     avs_readdata = {12'd0, dbg_lane_index, dbg_frac_y, dbg_frac_x};
+                `CSR_DBG_FRAC:     avs_readdata = {16'd0, dbg_frac_y, dbg_frac_x};
+                
+                // Debug registers - lane 1
+                `CSR_DBG_LANE1_COORD: avs_readdata = {dbg_lane1_src_y, dbg_lane1_src_x};
+                `CSR_DBG_LANE1_FRAC:  avs_readdata = {16'd0, dbg_lane1_frac_y, dbg_lane1_frac_x};
+                `CSR_DBG_LANE1_PIX:   avs_readdata = {dbg_lane1_p11, dbg_lane1_p10, dbg_lane1_p01, dbg_lane1_p00};
+                
+                // Debug registers - lane 2
+                `CSR_DBG_LANE2_COORD: avs_readdata = {dbg_lane2_src_y, dbg_lane2_src_x};
+                `CSR_DBG_LANE2_FRAC:  avs_readdata = {16'd0, dbg_lane2_frac_y, dbg_lane2_frac_x};
+                `CSR_DBG_LANE2_PIX:   avs_readdata = {dbg_lane2_p11, dbg_lane2_p10, dbg_lane2_p01, dbg_lane2_p00};
+                
+                // Debug registers - lane 3
+                `CSR_DBG_LANE3_COORD: avs_readdata = {dbg_lane3_src_y, dbg_lane3_src_x};
+                `CSR_DBG_LANE3_FRAC:  avs_readdata = {16'd0, dbg_lane3_frac_y, dbg_lane3_frac_x};
+                `CSR_DBG_LANE3_PIX:   avs_readdata = {dbg_lane3_p11, dbg_lane3_p10, dbg_lane3_p01, dbg_lane3_p00};
                 
                 default:           avs_readdata = 32'd0;
             endcase
