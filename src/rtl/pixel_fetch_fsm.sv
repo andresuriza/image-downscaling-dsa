@@ -77,16 +77,16 @@ module pixel_fetch_fsm #(
     input  logic               result_valid
 );
 
-    // Estados FSM
+    // Estados de la FSM principal
     typedef enum logic [3:0] {
         S_IDLE       = 4'd0,
-        S_COMPUTE    = 4'd1,   
-        S_FETCH      = 4'd2, 
-        S_PROCESS    = 4'd3,  
-        S_WRITE      = 4'd4, 
-        S_NEXT       = 4'd5,   
+        S_COMPUTE    = 4'd1,
+        S_FETCH      = 4'd2,
+        S_PROCESS    = 4'd3,
+        S_WRITE      = 4'd4,
+        S_NEXT       = 4'd5,
         S_DONE       = 4'd6,
-        S_WAIT_STEP  = 4'd7 
+        S_WAIT_STEP  = 4'd7
     } state_t;
     
     state_t state;
@@ -94,49 +94,46 @@ module pixel_fetch_fsm #(
     localparam MODE_SIMD   = 2'd0;
     localparam MODE_SERIAL = 2'd1;
     
-    // Coordenadas de salida e imagen fuente
-    logic [15:0] out_x, out_y;    
-    logic [2:0]  batch_size; 
-    logic [2:0]  batch_idx;     
+    // Coordenadas de salida actuales
+    logic [15:0] out_x, out_y;
+    logic [2:0]  batch_size;
+    logic [2:0]  batch_idx;
     
-    // Per-lane source coordinates (computed in S_COMPUTE)
+    // Coordenadas fuente por lane
     logic [15:0] lane_src_x_int [LANES-1:0];
     logic [15:0] lane_src_y_int [LANES-1:0];
     logic [7:0]  lane_frac_x    [LANES-1:0];
     logic [7:0]  lane_frac_y    [LANES-1:0];
-    logic        lane_valid     [LANES-1:0];  // Which lanes have valid pixels
+    logic        lane_valid     [LANES-1:0];
     
-    // Per-lane fetched pixels
+    // Píxeles vecinos por lane
     logic [7:0] lane_p00 [LANES-1:0];
     logic [7:0] lane_p01 [LANES-1:0];
     logic [7:0] lane_p10 [LANES-1:0];
     logic [7:0] lane_p11 [LANES-1:0];
     
-    // Fetch state machine
-    logic [2:0] fetch_lane;              // Which lane we're fetching for
-    logic [1:0] fetch_phase;             // 0=p00, 1=p01, 2=p10, 3=p11
+    // Control de lectura de píxeles
+    logic [2:0] fetch_lane;
+    logic [1:0] fetch_phase;
     logic       read_pending;
     logic       write_pending;
     
-    // Pixel reuse between batches
+    // Reuso entre batches
     logic [15:0] prev_src_x_int;
     logic [15:0] prev_src_y_int;
     logic        prev_valid;
-    logic [7:0]  prev_p01, prev_p11;     // Saved for reuse
+    logic [7:0]  prev_p01, prev_p11;
     
-    // Reuse detection flags (used in S_FETCH)
+    // Flags de detección de reuso
     logic        do_full_reuse;
     logic        do_partial_reuse;
-    logic [7:0]  pixel_data;             // Temporary for read data
+    logic [7:0]  pixel_data;
     
-    // Pipeline
+    // Control del pipeline
     logic        process_started;
     logic [1:0]  process_countdown;
     
-    //=======================================================
-    // Coordinate calculation - combinational for lane 0
-    // Formula: src_coord = out_coord / scale
-    //=======================================================
+    // Cálculo de coordenadas fuente (combinacional)
     logic [31:0] dividend_x, dividend_y;
     logic [31:0] src_coord_x_q8, src_coord_y_q8;
     
@@ -145,7 +142,7 @@ module pixel_fetch_fsm #(
     assign src_coord_x_q8 = (scale_q8_8[15:0] != 0) ? (dividend_x / scale_q8_8[15:0]) : 32'd0;
     assign src_coord_y_q8 = (scale_q8_8[15:0] != 0) ? (dividend_y / scale_q8_8[15:0]) : 32'd0;
     
-    // Per-lane coordinate calculation (for lanes 0-3)
+    // Coordenadas por lane
     logic [31:0] lane_dividend_x [LANES-1:0];
     logic [31:0] lane_src_coord_x_q8 [LANES-1:0];
     
@@ -158,18 +155,16 @@ module pixel_fetch_fsm #(
         end
     endgenerate
     
-    //=======================================================
-    // Address calculation for current fetch
-    //=======================================================
+    // Direcciones de memoria
     logic [31:0] addr_fetch;
     logic [31:0] addr_write;
     logic [31:0] x0_fetch, y0_fetch, x1_fetch, y1_fetch;
     
-    // Current lane's coordinates for fetching
+    // Coordenadas del lane actual
     wire [15:0] cur_src_x = lane_src_x_int[fetch_lane];
     wire [15:0] cur_src_y = lane_src_y_int[fetch_lane];
     
-    // Clamp coordinates
+    // Clamp de coordenadas
     wire [31:0] x0_raw = {16'd0, cur_src_x};
     wire [31:0] y0_raw = {16'd0, cur_src_y};
     assign x0_fetch = (x0_raw >= in_width) ? in_width - 32'd1 : x0_raw;
@@ -177,23 +172,23 @@ module pixel_fetch_fsm #(
     assign x1_fetch = (x0_fetch + 1 < in_width) ? x0_fetch + 32'd1 : in_width - 32'd1;
     assign y1_fetch = (y0_fetch + 1 < in_height) ? y0_fetch + 32'd1 : in_height - 32'd1;
     
-    // Fetch address based on phase
+    // Dirección de lectura según fase
     always_comb begin
         case (fetch_phase)
-            2'd0: addr_fetch = img_in_addr + y0_fetch * in_width + x0_fetch; // p00
-            2'd1: addr_fetch = img_in_addr + y0_fetch * in_width + x1_fetch; // p01
-            2'd2: addr_fetch = img_in_addr + y1_fetch * in_width + x0_fetch; // p10
-            2'd3: addr_fetch = img_in_addr + y1_fetch * in_width + x1_fetch; // p11
+            2'd0: addr_fetch = img_in_addr + y0_fetch * in_width + x0_fetch;
+            2'd1: addr_fetch = img_in_addr + y0_fetch * in_width + x1_fetch;
+            2'd2: addr_fetch = img_in_addr + y1_fetch * in_width + x0_fetch;
+            2'd3: addr_fetch = img_in_addr + y1_fetch * in_width + x1_fetch;
         endcase
     end
     
-    // Write address for current batch index
+    // Dirección de escritura
     assign addr_write = img_out_addr + {16'd0, out_y} * out_width + {16'd0, out_x} + {29'd0, batch_idx};
     
-   //  Máquina de estados principal
+    // FSM principal del módulo
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // Estado inicial del hardware
+            // Reset
             state <= S_IDLE;
             busy <= 1'b0;
             done <= 1'b0;
@@ -232,7 +227,7 @@ module pixel_fetch_fsm #(
                 lane_p11[i] <= 8'd0;
             end
         end else if (abort) begin
-            // Cancelar operación actual
+            // Abortar operación
             state <= S_IDLE;
             busy <= 1'b0;
             read_pending <= 1'b0;
@@ -246,7 +241,7 @@ module pixel_fetch_fsm #(
             
             case (state)
                 S_IDLE: begin
-                    // Espera al inicio
+                    // Inactivo
                     busy <= 1'b0;
                     pixels_valid <= 1'b0;
                     sdram_read <= 1'b0;
@@ -265,21 +260,21 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
-                // Coordenadas ya están listas combinacionalmente, pasar a lectura
+                // Calcular coordenadas fuente y batch
                 S_COMPUTE: begin
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
                     read_pending <= 1'b0;
                     
                     if (mode == MODE_SERIAL) begin
-                        // Serial mode: 1 pixel at a time
+                        // Modo serial: 1 píxel
                         batch_size <= 3'd1;
                         lane_valid[0] <= 1'b1;
                         lane_valid[1] <= 1'b0;
                         lane_valid[2] <= 1'b0;
                         lane_valid[3] <= 1'b0;
                     end else begin
-                        // SIMD mode (also works in stepping): up to 4 pixels
+                        // Modo SIMD: hasta 4 píxeles
                         if (out_x + 4 <= out_width[15:0]) begin
                             batch_size <= 3'd4;
                             lane_valid[0] <= 1'b1;
@@ -307,20 +302,18 @@ module pixel_fetch_fsm #(
                         end
                     end
                     
-                    // Compute source coordinates for all lanes
-                    // Y coordinate is same for all lanes (same row)
+                    // Calcular coordenadas para todos los lanes
                     for (int i = 0; i < LANES; i++) begin
                         lane_src_x_int[i] <= lane_src_coord_x_q8[i][23:8];
-                        lane_src_y_int[i] <= src_coord_y_q8[23:8];  // Same Y for all
+                        lane_src_y_int[i] <= src_coord_y_q8[23:8];
                         lane_frac_x[i] <= lane_src_coord_x_q8[i][7:0];
-                        lane_frac_y[i] <= src_coord_y_q8[7:0];       // Same frac_y for all
+                        lane_frac_y[i] <= src_coord_y_q8[7:0];
                     end
                     
-                    // Check reuse for lane 0 from previous batch
+                    // Verificar reuso del batch anterior en lane 0
                     if (prev_valid && 
                         (lane_src_coord_x_q8[0][23:8] == prev_src_x_int + 16'd1) &&
                         (src_coord_y_q8[23:8] == prev_src_y_int)) begin
-                        // Reuse p01->p00, p11->p10 for lane 0
                         lane_p00[0] <= prev_p01;
                         lane_p10[0] <= prev_p11;
                         perf_pixel_reuse <= perf_pixel_reuse + 1;
@@ -331,27 +324,27 @@ module pixel_fetch_fsm #(
                     state <= S_FETCH;
                 end
                 
-                // Leer 4 pixeles vecinos desde SDRAM
-                S_FETCH: begin        
+                // Leer píxeles vecinos de SDRAM
+                S_FETCH: begin
                     if (fetch_lane >= batch_size) begin
-                        // All lanes fetched
+                        // Todos los lanes leídos
                         state <= S_PROCESS;
                         process_started <= 1'b0;
                         process_countdown <= 2'd3;
                     end else if (!lane_valid[fetch_lane]) begin
-                        // Skip invalid lanes
+                        // Saltar lanes inválidos
                         fetch_lane <= fetch_lane + 1;
                         fetch_phase <= 2'd0;
                     end else if (!read_pending) begin
-                        // Check if we can reuse from previous lane within batch
+                        // Verificar reuso dentro del batch
                         do_full_reuse = 1'b0;
                         do_partial_reuse = 1'b0;
                         
                         if (fetch_lane > 0 && fetch_phase == 2'd0) begin
-                            // Check if this lane has same source coords as previous lane
+                            // Mismo píxel fuente que lane anterior
                             if (lane_src_x_int[fetch_lane] == lane_src_x_int[fetch_lane-1] &&
                                 lane_src_y_int[fetch_lane] == lane_src_y_int[fetch_lane-1]) begin
-                                // Same source pixel - full reuse
+                                // Reuso completo
                                 lane_p00[fetch_lane] <= lane_p00[fetch_lane-1];
                                 lane_p01[fetch_lane] <= lane_p01[fetch_lane-1];
                                 lane_p10[fetch_lane] <= lane_p10[fetch_lane-1];
@@ -360,33 +353,30 @@ module pixel_fetch_fsm #(
                                 perf_pixel_reuse <= perf_pixel_reuse + 1;
                             end else if (lane_src_x_int[fetch_lane] == lane_src_x_int[fetch_lane-1] + 16'd1 &&
                                          lane_src_y_int[fetch_lane] == lane_src_y_int[fetch_lane-1]) begin
-                                // Adjacent source pixel - partial reuse p01->p00, p11->p10
+                                // Píxel adyacente: reuso parcial
                                 lane_p00[fetch_lane] <= lane_p01[fetch_lane-1];
                                 lane_p10[fetch_lane] <= lane_p11[fetch_lane-1];
                                 do_partial_reuse = 1'b1;
-                                // Will start fetch from phase 1
                             end
                         end else if (fetch_lane == 0 && fetch_phase == 2'd0 && prev_valid &&
                                      lane_src_x_int[0] == prev_src_x_int + 16'd1 &&
                                      lane_src_y_int[0] == prev_src_y_int) begin
-                            // Lane 0 partial reuse from previous batch (already set in S_COMPUTE)
+                            // Reuso parcial de batch anterior
                             do_partial_reuse = 1'b1;
                         end
                         
                         if (do_full_reuse) begin
-                            // Full reuse - move to next lane
+                            // Avanzar al siguiente lane
                             fetch_lane <= fetch_lane + 1;
                             fetch_phase <= 2'd0;
                         end else if (do_partial_reuse && fetch_phase == 2'd0) begin
-                            // Skip phase 0, go to phase 1
+                            // Saltar fase 0
                             fetch_phase <= 2'd1;
                         end else begin
-                            // Issue read request
+                            // Emitir lectura SDRAM
                             sdram_read <= 1'b1;
                             sdram_byteenable <= 2'b11;
                             sdram_address <= {addr_fetch[31:1], 1'b0};
-                            
-                            // Request accepted when waitrequest is low
                             if (!sdram_waitrequest) begin
                                 read_pending <= 1'b1;
                                 sdram_read <= 1'b0;
@@ -396,12 +386,12 @@ module pixel_fetch_fsm #(
                         sdram_read <= 1'b0;
                     end
                     
-                    // Handle read data
+                    // Procesar datos recibidos
                     if (sdram_readdatavalid) begin
                         perf_mem_reads <= perf_mem_reads + 1;
                         read_pending <= 1'b0;
                         
-                        // Store pixel based on byte alignment
+                        // Extraer byte del píxel
                         pixel_data = addr_fetch[0] ? sdram_readdata[15:8] : sdram_readdata[7:0];
                         
                         case (fetch_phase)
@@ -411,7 +401,7 @@ module pixel_fetch_fsm #(
                             2'd3: lane_p11[fetch_lane] <= pixel_data;
                         endcase
                         
-                        // Advance phase/lane
+                        // Avanzar fase/lane
                         if (fetch_phase == 2'd3) begin
                             if (fetch_lane + 1 >= batch_size) begin
                                 state <= S_PROCESS;
@@ -422,17 +412,17 @@ module pixel_fetch_fsm #(
                                 fetch_phase <= 2'd0;
                             end
                         end else begin
-                            // Check if we should skip phase 2 (reusing p10)
+                            // Verificar si saltar p10
                             if (fetch_phase == 2'd1) begin
-                                // Check for partial reuse - skip p10
+                                // Reuso parcial: saltar p10
                                 if (fetch_lane > 0 &&
                                     lane_src_x_int[fetch_lane] == lane_src_x_int[fetch_lane-1] + 16'd1 &&
                                     lane_src_y_int[fetch_lane] == lane_src_y_int[fetch_lane-1]) begin
-                                    fetch_phase <= 2'd3;  // Skip p10
+                                    fetch_phase <= 2'd3;
                                 end else if (fetch_lane == 0 && prev_valid &&
                                              lane_src_x_int[0] == prev_src_x_int + 16'd1 &&
                                              lane_src_y_int[0] == prev_src_y_int) begin
-                                    fetch_phase <= 2'd3;  // Skip p10 for lane 0 with batch reuse
+                                    fetch_phase <= 2'd3;
                                 end else begin
                                     fetch_phase <= fetch_phase + 1;
                                 end
@@ -443,7 +433,7 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
-                 // Enviar pixeles al módulo de downscaling
+                // Enviar píxeles al downscaler
                 S_PROCESS: begin
                     sdram_read <= 1'b0;
                     sdram_write <= 1'b0;
@@ -474,7 +464,7 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
-                // Escribir pixel final en SDRAM
+                // Escribir resultado en SDRAM
                 S_WRITE: begin
                     if (batch_idx < batch_size && lane_valid[batch_idx]) begin
                         if (!write_pending) begin
@@ -545,7 +535,7 @@ module pixel_fetch_fsm #(
                     end
                 end
                 
-                // Finalización del procesamiento
+                // Finalizar procesamiento
                 S_DONE: begin
                     done <= 1'b1;
                     busy <= 1'b0;

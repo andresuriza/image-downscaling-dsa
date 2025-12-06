@@ -1,13 +1,7 @@
-//=======================================================
-// Accelerator CSR Bridge (Simplified)
-// Minimal register set for image downscaling control
-//
-// Parameters inherited from downscaler_top
-//=======================================================
+// Bridge de registros CSR del acelerador
+// Conjunto mínimo de registros para control
 
-//-------------------------------------------------------
-// CSR Register Offsets (32-bit aligned)
-//-------------------------------------------------------
+// Offsets de registros CSR
 `define CSR_CTRL           12'h000   // [0]=start, [1]=reset
 `define CSR_STATUS         12'h004   // [0]=busy, [1]=done
 `define CSR_IN_WIDTH       12'h008   // Input image width
@@ -62,11 +56,8 @@ module accelerator_csr_bridge #(
     input  logic        clk,
     input  logic        rst_n,
     
-    //=======================================================
-    // Avalon-MM Slave Interface (directly mapped to CSR space)
-    // Connect to a second port of csr_ram or use address decode
-    //=======================================================
-    input  logic [11:0] avs_address,      // 12-bit = 4KB address space
+    // Interfaz Avalon-MM Slave
+    input  logic [11:0] avs_address,
     input  logic        avs_read,
     input  logic        avs_write,
     input  logic [31:0] avs_writedata,
@@ -74,10 +65,7 @@ module accelerator_csr_bridge #(
     output logic [31:0] avs_readdata,
     output logic        avs_waitrequest,
     
-    //=======================================================
-    // Accelerator Control Interface (directly to simd_downscaler)
-    //=======================================================
-    // Control outputs
+    // Control del acelerador
     output logic        acc_start,
     output logic        acc_reset,
     output logic [31:0] acc_in_width,
@@ -92,27 +80,21 @@ module accelerator_csr_bridge #(
     input  logic [31:0] acc_progress,
     input  logic [31:0] acc_errors,
     
-    // Performance counter inputs
+    // Contadores de rendimiento
     input  logic [63:0] acc_perf_flops,
     input  logic [63:0] acc_perf_mem_reads,
     input  logic [63:0] acc_perf_mem_writes,
     input  logic [63:0] acc_perf_pixel_reuse,
     
-    //=======================================================
-    // Stepping Control (optional)
-    //=======================================================
-    output logic        step_enable,      // Enable step mode
-    output logic        step_once,        // Trigger single step
+    // Control de stepping
+    output logic        step_enable,
+    output logic        step_once,
     
-    //=======================================================
-    // DMA Address Configuration (for SDRAM image transfer)
-    //=======================================================
-    output logic [31:0] img_in_addr,      // Input image SDRAM address
-    output logic [31:0] img_out_addr,     // Output image SDRAM address
+    // Direcciones DMA
+    output logic [31:0] img_in_addr,
+    output logic [31:0] img_out_addr,
     
-    //=======================================================
-    // Debug/Observability Inputs (from pixel_fetch_fsm)
-    //=======================================================
+    // Señales de debug
     input  logic [3:0]    dbg_fsm_state,
     input  logic [15:0]   dbg_out_x,
     input  logic [15:0]   dbg_out_y,
@@ -159,9 +141,7 @@ module accelerator_csr_bridge #(
     input  logic [7:0]    dbg_lane3_p11
 );
 
-    //=======================================================
-    // Internal Registers
-    //=======================================================
+    // Registros internos
     logic [31:0] reg_ctrl;
     logic [31:0] reg_in_width;
     logic [31:0] reg_in_height;
@@ -172,12 +152,12 @@ module accelerator_csr_bridge #(
     logic [31:0] reg_img_in_addr;
     logic [31:0] reg_img_out_addr;
     
-    // Cycle counter (internal performance counter)
+    // Contador de ciclos
     logic [63:0] cycle_counter;
     logic        was_busy;
     logic        done_flag;
     
-    // Control signal extraction
+    // Extracción de señales de control
     assign acc_start     = reg_ctrl[0];
     assign acc_reset     = reg_ctrl[1];
     assign step_enable   = reg_ctrl[2];
@@ -193,18 +173,14 @@ module accelerator_csr_bridge #(
     assign img_in_addr   = reg_img_in_addr;
     assign img_out_addr  = reg_img_out_addr;
     
-    // No wait states for simple register access
     assign avs_waitrequest = 1'b0;
     
-    //=======================================================
-    // Cycle Counter Logic
-    //=======================================================
-    // Detect start/reset commands from CTRL register writes
+    // Detección de comandos
     logic start_cmd, reset_cmd;
     assign start_cmd = avs_write && (avs_address == `CSR_CTRL) && avs_writedata[0];
     assign reset_cmd = avs_write && (avs_address == `CSR_CTRL) && avs_writedata[1];
     
-    // S_WAIT_STEP state = 7, don't count cycles while waiting for step
+    // Estado S_WAIT_STEP, no contar ciclos
     logic fsm_waiting_step;
     assign fsm_waiting_step = (dbg_fsm_state == 4'd7);
     
@@ -216,42 +192,40 @@ module accelerator_csr_bridge #(
         end else begin
             was_busy <= acc_busy;
             
-            // Reset counter on explicit reset command or start command
+            // Reset en comando explícito
             if (reset_cmd || start_cmd) begin
                 cycle_counter <= 64'd0;
                 done_flag <= 1'b0;
             end
-            // Count while busy AND not waiting for step
+            // Contar solo si busy y no esperando step
             else if (acc_busy && !fsm_waiting_step) begin
                 cycle_counter <= cycle_counter + 1;
             end
-            // Detect falling edge of busy (done)
+            // Detectar finalización
             else if (!acc_busy && was_busy) begin
                 done_flag <= 1'b1;
             end
         end
     end
     
-    //=======================================================
-    // Register Write Logic
-    //=======================================================
+    // Lógica de escritura de registros
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             reg_ctrl        <= 32'd0;
-            reg_in_width    <= 32'd512;   // Default 512x512
+            reg_in_width    <= 32'd512;
             reg_in_height   <= 32'd512;
-            reg_out_width   <= 32'd256;   // Default output 256x256 (0.5 scale)
+            reg_out_width   <= 32'd256;
             reg_out_height  <= 32'd256;
-            reg_scale_q8_8  <= 32'h0080;  // 0.5 in Q8.8 = 128
-            reg_mode        <= 32'd0;     // SIMD mode (0), lanes fixed at 4
-            reg_img_in_addr <= 32'h0000_0000;  // SDRAM base
-            reg_img_out_addr<= 32'h0010_0000;  // 1MB offset
+            reg_scale_q8_8  <= 32'h0080;
+            reg_mode        <= 32'd0;
+            reg_img_in_addr <= 32'h0000_0000;
+            reg_img_out_addr<= 32'h0010_0000;
         end else begin
-            // Auto-clear start bit after one cycle
+            // Auto-clear del bit start
             if (reg_ctrl[0]) begin
                 reg_ctrl[0] <= 1'b0;
             end
-            // Auto-clear step_once after one cycle
+            // Auto-clear del bit step_once
             if (reg_ctrl[3]) begin
                 reg_ctrl[3] <= 1'b0;
             end
@@ -268,21 +242,18 @@ module accelerator_csr_bridge #(
                     `CSR_MODE:        reg_mode        <= avs_writedata;
                     `CSR_IMG_IN_ADDR: reg_img_in_addr <= avs_writedata;
                     `CSR_IMG_OUT_ADDR:reg_img_out_addr<= avs_writedata;
-                    default: ; // Ignore writes to read-only registers
+                    default: ;
                 endcase
             end
         end
     end
     
-    //=======================================================
-    // Register Read Logic (Simplified)
-    //=======================================================
+    // Lógica de lectura de registros
     always_comb begin
         avs_readdata = 32'd0;
         
         if (avs_read) begin
             case (avs_address)
-                // Essential registers
                 `CSR_CTRL:         avs_readdata = reg_ctrl;
                 `CSR_STATUS:       avs_readdata = {30'd0, done_flag, acc_busy};
                 `CSR_IN_WIDTH:     avs_readdata = reg_in_width;
@@ -293,11 +264,9 @@ module accelerator_csr_bridge #(
                 `CSR_MODE:         avs_readdata = reg_mode;
                 `CSR_PROGRESS:     avs_readdata = acc_progress;
                 
-                // DMA addresses
                 `CSR_IMG_IN_ADDR:  avs_readdata = reg_img_in_addr;
                 `CSR_IMG_OUT_ADDR: avs_readdata = reg_img_out_addr;
                 
-                // Performance Counters
                 `CSR_PERF_CYCLES_LO: avs_readdata = cycle_counter[31:0];
                 `CSR_PERF_CYCLES_HI: avs_readdata = cycle_counter[63:32];
                 `CSR_PERF_REUSE_LO:  avs_readdata = acc_perf_pixel_reuse[31:0];
@@ -309,27 +278,22 @@ module accelerator_csr_bridge #(
                 `CSR_PERF_FLOPS_LO:  avs_readdata = acc_perf_flops[31:0];
                 `CSR_PERF_FLOPS_HI:  avs_readdata = acc_perf_flops[63:32];
                 
-                // Version: v1.3 (SIMD batch mode with per-lane debug)
                 `CSR_VERSION:      avs_readdata = 32'h0001_0300;
                 
-                // Debug registers - lane 0 (read-only)
                 `CSR_DBG_OUT_Y:    avs_readdata = {13'd0, dbg_batch_size, dbg_out_y};
                 `CSR_DBG_PIXELS:   avs_readdata = {dbg_p11, dbg_p10, dbg_p01, dbg_p00};
                 `CSR_DBG_FSM:      avs_readdata = {12'd0, dbg_fsm_state, dbg_out_x};
                 `CSR_DBG_COORD:    avs_readdata = {dbg_src_y_int, dbg_src_x_int};
                 `CSR_DBG_FRAC:     avs_readdata = {16'd0, dbg_frac_y, dbg_frac_x};
                 
-                // Debug registers - lane 1
                 `CSR_DBG_LANE1_COORD: avs_readdata = {dbg_lane1_src_y, dbg_lane1_src_x};
                 `CSR_DBG_LANE1_FRAC:  avs_readdata = {16'd0, dbg_lane1_frac_y, dbg_lane1_frac_x};
                 `CSR_DBG_LANE1_PIX:   avs_readdata = {dbg_lane1_p11, dbg_lane1_p10, dbg_lane1_p01, dbg_lane1_p00};
                 
-                // Debug registers - lane 2
                 `CSR_DBG_LANE2_COORD: avs_readdata = {dbg_lane2_src_y, dbg_lane2_src_x};
                 `CSR_DBG_LANE2_FRAC:  avs_readdata = {16'd0, dbg_lane2_frac_y, dbg_lane2_frac_x};
                 `CSR_DBG_LANE2_PIX:   avs_readdata = {dbg_lane2_p11, dbg_lane2_p10, dbg_lane2_p01, dbg_lane2_p00};
                 
-                // Debug registers - lane 3
                 `CSR_DBG_LANE3_COORD: avs_readdata = {dbg_lane3_src_y, dbg_lane3_src_x};
                 `CSR_DBG_LANE3_FRAC:  avs_readdata = {16'd0, dbg_lane3_frac_y, dbg_lane3_frac_x};
                 `CSR_DBG_LANE3_PIX:   avs_readdata = {dbg_lane3_p11, dbg_lane3_p10, dbg_lane3_p01, dbg_lane3_p00};

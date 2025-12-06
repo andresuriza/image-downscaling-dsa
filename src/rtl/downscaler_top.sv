@@ -1,30 +1,21 @@
-//=======================================================
-// Downscaler Top Module
-// Integrates CSR bridge, Pixel Fetch FSM, and SIMD accelerator
-// Uses SDRAM for image storage (supports up to MAX_IMAGE_SIZE)
-//
-// All design parameters are declared here and propagated
-// to sub-modules for centralized configuration.
-//=======================================================
+// Módulo top del downscaler
+// Integra CSR bridge, FSM de fetch y aceleradores SIMD/Serial
 
 module downscaler_top #(
-    // Core design parameters - modify these for configuration
-    parameter int LANES          = 4,       // SIMD lanes (fixed at 4 for this design)
-    parameter int Q              = 8,       // Fractional bits for Q8.8 fixed-point
-    parameter int MAX_IMAGE_SIZE = 2048,    // Maximum supported image dimension
-    parameter int PIXEL_WIDTH    = 8,       // Bits per pixel (grayscale)
+    // Parámetros principales
+    parameter int LANES          = 4,
+    parameter int Q              = 8,
+    parameter int MAX_IMAGE_SIZE = 2048,
+    parameter int PIXEL_WIDTH    = 8,
     
-    // Derived parameters (do not modify)
-    parameter int PACKED_WIDTH   = LANES * PIXEL_WIDTH,  // Width of packed pixel bus
-    parameter int FRAC_WIDTH     = LANES * Q             // Width of packed fraction bus
+    // Parámetros derivados
+    parameter int PACKED_WIDTH   = LANES * PIXEL_WIDTH,
+    parameter int FRAC_WIDTH     = LANES * Q
 ) (
     input  logic        clk,
     input  logic        rst_n,
     
-    //=======================================================
-    // Avalon-MM Slave Interface (CSR registers)
-    // Base address: 0x0404_0000
-    //=======================================================
+    // Interfaz Avalon-MM Slave (registros CSR)
     input  logic [11:0] csr_address,
     input  logic        csr_read,
     input  logic        csr_write,
@@ -33,10 +24,7 @@ module downscaler_top #(
     output logic [31:0] csr_readdata,
     output logic        csr_waitrequest,
     
-    //=======================================================
-    // Avalon-MM Master Interface (to SDRAM)
-    // Addresses: 0x0000_0000 - 0x03FF_FFFF
-    //=======================================================
+    // Interfaz Avalon-MM Master (SDRAM)
     output logic [31:0] sdram_address,
     output logic        sdram_read,
     output logic        sdram_write,
@@ -47,9 +35,7 @@ module downscaler_top #(
     output logic [1:0]  sdram_byteenable
 );
 
-    //=======================================================
-    // Internal Signals - CSR Bridge outputs
-    //=======================================================
+    // Señales de control desde CSR
     logic        acc_start;
     logic        acc_reset;
     logic [31:0] acc_in_width, acc_in_height;
@@ -57,7 +43,7 @@ module downscaler_top #(
     logic [31:0] acc_scale_q8_8;
     logic [1:0]  acc_mode;
     
-    // Stepping control
+    // Control de stepping
     logic        step_enable;
     logic        step_once;
     
@@ -65,9 +51,7 @@ module downscaler_top #(
     logic [31:0] img_in_addr;
     logic [31:0] img_out_addr;
     
-    //=======================================================
-    // Internal Signals - FSM to CSR status
-    //=======================================================
+    // Estado de la FSM hacia CSR
     logic        fsm_busy;
     logic        fsm_done;
     logic [31:0] fsm_progress;
@@ -76,9 +60,7 @@ module downscaler_top #(
     logic [63:0] fsm_perf_mem_writes;
     logic [63:0] fsm_perf_pixel_reuse;
     
-    //=======================================================
-    // Internal Signals - Debug/Observability
-    //=======================================================
+    // Señales de debug
     logic [3:0]           dbg_fsm_state;
     logic [15:0]          dbg_out_x;
     logic [15:0]          dbg_out_y;
@@ -109,54 +91,44 @@ module downscaler_top #(
     logic [7:0]           dbg_lane3_frac_x, dbg_lane3_frac_y;
     logic [7:0]           dbg_lane3_p00, dbg_lane3_p01, dbg_lane3_p10, dbg_lane3_p11;
     
-    //=======================================================
-    // Internal Signals - FSM to SIMD interface
-    //=======================================================
+    // Interfaz FSM a SIMD
     logic [PACKED_WIDTH-1:0] p00_packed, p01_packed, p10_packed, p11_packed;
     logic [FRAC_WIDTH-1:0]   frac_x_packed, frac_y_packed;
     logic                    pixels_valid;
     logic [PACKED_WIDTH-1:0] result_pixels;
     logic                    result_valid;
     
-    //=======================================================
-    // SIMD Downscaler Performance Counter (FLOPs)
-    //=======================================================
+    // Contadores de FLOPs
     logic [63:0] simd_perf_flops;
     logic [63:0] serial_perf_flops;
     
-    //=======================================================
-    // Serial Downscaler Signals
-    //=======================================================
+    // Señales del downscaler serial
     logic [PIXEL_WIDTH-1:0]  serial_out_pixel;
     logic                    serial_out_valid;
     logic [PACKED_WIDTH-1:0] serial_result_pixels;
     
-    // Serial uses only lane 0, replicate to all lanes for FSM compatibility
+    // Replicar resultado serial a todos los lanes
     always_comb begin
         serial_result_pixels = '0;
         serial_result_pixels[PIXEL_WIDTH-1:0] = serial_out_pixel;
     end
     
-    // Mode selection: 0 = SIMD, 1 = Serial
+    // Selección de modo
     logic use_serial_mode;
     assign use_serial_mode = (acc_mode == 2'd1);
     
-    // Mux results based on mode
+    // Mux de resultados
     assign result_pixels = use_serial_mode ? serial_result_pixels : simd_result_pixels;
     assign result_valid  = use_serial_mode ? serial_out_valid : simd_out_valid;
     
-    // Select FLOPs counter based on mode
+    // Selección de contador FLOPs
     wire [63:0] active_perf_flops = use_serial_mode ? serial_perf_flops : simd_perf_flops;
     
-    //=======================================================
-    // Internal SIMD signals (before mux)
-    //=======================================================
+    // Señales SIMD internas
     logic [PACKED_WIDTH-1:0] simd_result_pixels;
     logic                    simd_out_valid;
     
-    //=======================================================
-    // CSR Bridge Instance
-    //=======================================================
+    // Instancia CSR Bridge
     accelerator_csr_bridge #(
         .LANES(LANES),
         .Q(Q)
@@ -249,10 +221,7 @@ module downscaler_top #(
         .dbg_lane3_p11    (dbg_lane3_p11)
     );
     
-    //=======================================================
-    // Pixel Fetch FSM Instance
-    // Manages SDRAM reads/writes and feeds SIMD accelerator
-    //=======================================================
+    // Instancia Pixel Fetch FSM
     pixel_fetch_fsm #(
         .LANES(LANES),
         .Q(Q),
@@ -355,10 +324,7 @@ module downscaler_top #(
         .result_valid     (result_valid)
     );
     
-    //=======================================================
-    // SIMD Downscaler Instance
-    // Parallel bilinear interpolation (LANES pixels per cycle)
-    //=======================================================
+    // Instancia SIMD Downscaler
     simd_downscaler #(
         .LANES(LANES),
         .Q(Q)
@@ -366,7 +332,6 @@ module downscaler_top #(
         .clk              (clk),
         .rst_n            (rst_n & ~acc_reset),
         
-        // Control (directly from FSM valid signal, only when in SIMD mode)
         .start            (pixels_valid & ~use_serial_mode),
         .in_width         (acc_in_width),
         .in_height        (acc_in_height),
@@ -374,15 +339,13 @@ module downscaler_top #(
         .out_height       (acc_out_height),
         .scale_q8_8       (acc_scale_q8_8),
         
-        // Status (used for FLOPs counting)
-        .busy             (),  // FSM manages overall busy
-        .progress         (),  // FSM tracks progress
+        .busy             (),
+        .progress         (),
         .errors           (),
         
-        // Performance counters
         .perf_flops       (simd_perf_flops),
-        .perf_mem_reads   (),  // FSM tracks this
-        .perf_mem_writes  (),  // FSM tracks this
+        .perf_mem_reads   (),
+        .perf_mem_writes  (),
         
         // Pixel data from FSM
         .p00_packed       (p00_packed),
@@ -392,22 +355,17 @@ module downscaler_top #(
         .frac_x_packed    (frac_x_packed),
         .frac_y_packed    (frac_y_packed),
         
-        // Output (internal, before mux)
         .out_pixels_packed(simd_result_pixels),
         .out_valid        (simd_out_valid)
     );
     
-    //=======================================================
-    // Serial Downscaler Instance
-    // Single pixel bilinear interpolation (1 pixel per cycle)
-    //=======================================================
+    // Instancia Serial Downscaler
     downscaling_serial #(
         .Q(Q)
     ) u_serial (
         .clk              (clk),
         .rst_n            (rst_n & ~acc_reset),
         
-        // Control (only when in serial mode)
         .start            (pixels_valid & use_serial_mode),
         .in_width         (acc_in_width),
         .in_height        (acc_in_height),
@@ -415,17 +373,14 @@ module downscaler_top #(
         .out_height       (acc_out_height),
         .scale_q8_8       (acc_scale_q8_8),
         
-        // Status
-        .busy             (),  // FSM manages overall busy
-        .progress         (),  // FSM tracks progress
+        .busy             (),
+        .progress         (),
         .errors           (),
         
-        // Performance counters
         .perf_flops       (serial_perf_flops),
-        .perf_mem_reads   (),  // FSM tracks this
-        .perf_mem_writes  (),  // FSM tracks this
+        .perf_mem_reads   (),
+        .perf_mem_writes  (),
         
-        // Pixel data from FSM (only lane 0)
         .p00              (p00_packed[PIXEL_WIDTH-1:0]),
         .p01              (p01_packed[PIXEL_WIDTH-1:0]),
         .p10              (p10_packed[PIXEL_WIDTH-1:0]),
