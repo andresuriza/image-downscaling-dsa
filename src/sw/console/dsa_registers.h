@@ -33,23 +33,42 @@
 #define CSR_OUT_WIDTH       0x010   /* Output image width */
 #define CSR_OUT_HEIGHT      0x014   /* Output image height */
 #define CSR_SCALE_Q8_8      0x018   /* Q8.8 scale factor */
-#define CSR_MODE            0x01C   /* Mode configuration */
-#define CSR_PROGRESS        0x020   /* Progress (RO) */
-#define CSR_ERRORS          0x024   /* Error count (RO) */
+#define CSR_MODE            0x020   /* Mode configuration */
+#define CSR_PROGRESS        0x024   /* Progress (RO) */
 
-/* Performance Counters (64-bit split) */
-#define CSR_PERF_FLOPS_LO   0x040
-#define CSR_PERF_FLOPS_HI   0x044
-#define CSR_PERF_READS_LO   0x048
-#define CSR_PERF_READS_HI   0x04C
-#define CSR_PERF_WRITES_LO  0x050
-#define CSR_PERF_WRITES_HI  0x054
+/* Performance Counters */
 #define CSR_PERF_CYCLES_LO  0x058
 #define CSR_PERF_CYCLES_HI  0x05C
+#define CSR_PERF_REUSE_LO   0x060   /* Pixel reuse count [31:0] */
+#define CSR_PERF_REUSE_HI   0x064   /* Pixel reuse count [63:32] */
+#define CSR_PERF_MEM_RD_LO  0x068   /* Memory reads [31:0] */
+#define CSR_PERF_MEM_RD_HI  0x06C   /* Memory reads [63:32] */
+#define CSR_PERF_MEM_WR_LO  0x070   /* Memory writes [31:0] */
+#define CSR_PERF_MEM_WR_HI  0x074   /* Memory writes [63:32] */
+#define CSR_PERF_FLOPS_LO   0x078   /* FLOPs count [31:0] */
+#define CSR_PERF_FLOPS_HI   0x07C   /* FLOPs count [63:32] */
 
 /* DMA Configuration */
 #define CSR_IMG_IN_ADDR     0x080
 #define CSR_IMG_OUT_ADDR    0x084
+
+/* Debug Registers (read-only) */
+#define CSR_DBG_FSM         0x0F0   /* [19:16]=FSM state, [15:0]=out_x */
+#define CSR_DBG_OUT_Y       0x0E0   /* [15:0]=out_y, [18:16]=batch_size */
+#define CSR_DBG_COORD       0x0F4   /* [31:16]=src_y_int, [15:0]=src_x_int (lane 0) */
+#define CSR_DBG_FRAC        0x0F8   /* [15:8]=frac_y, [7:0]=frac_x (lane 0) */
+#define CSR_DBG_PIXELS      0x0E4   /* [31:24]=p11, [23:16]=p10, [15:8]=p01, [7:0]=p00 (lane 0) */
+
+/* Debug Registers for lanes 1-3 */
+#define CSR_DBG_LANE1_COORD 0x0A0   /* [31:16]=src_y_int, [15:0]=src_x_int (lane 1) */
+#define CSR_DBG_LANE1_FRAC  0x0A4   /* [15:8]=frac_y, [7:0]=frac_x (lane 1) */
+#define CSR_DBG_LANE1_PIX   0x0A8   /* [31:24]=p11, [23:16]=p10, [15:8]=p01, [7:0]=p00 (lane 1) */
+#define CSR_DBG_LANE2_COORD 0x0B0   /* lane 2 */
+#define CSR_DBG_LANE2_FRAC  0x0B4
+#define CSR_DBG_LANE2_PIX   0x0B8
+#define CSR_DBG_LANE3_COORD 0x0C0   /* lane 3 */
+#define CSR_DBG_LANE3_FRAC  0x0C4
+#define CSR_DBG_LANE3_PIX   0x0C8
 
 /* Version */
 #define CSR_VERSION         0x0FC
@@ -70,20 +89,20 @@
 #define STATUS_ERROR_MASK   (0xF << 4)
 
 /*===========================================================================
- * Mode Register
+ * Mode Register - Simplified: only mode bit used
+ * [0] = 0: SIMD (4 lanes), 1: Serial (1 pixel/cycle)
  *===========================================================================*/
 #define MODE_SIMD           0
 #define MODE_SERIAL         1
-#define MODE_LANES_SHIFT    4
+#define SIMD_LANES          4   /* Fixed at 4 lanes */
 
 /*===========================================================================
  * Constants
  *===========================================================================*/
 #define EXPECTED_VERSION    0x00010000
-#define MAX_IMAGE_SIZE      512
+#define MAX_IMAGE_SIZE      2048
 #define MIN_SCALE_Q8_8      0x0080  /* 0.5 */
 #define MAX_SCALE_Q8_8      0x0100  /* 1.0 */
-#define DEFAULT_SIMD_LANES  8
 
 #define DEFAULT_IMG_IN_ADDR  0x00000000
 #define DEFAULT_IMG_OUT_ADDR 0x00100000

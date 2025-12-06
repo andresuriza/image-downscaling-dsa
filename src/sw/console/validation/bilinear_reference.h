@@ -118,8 +118,9 @@ static inline uint8_t bilinear_interpolate(
     /* Result is in Q16.16 + 8 = Q24.16 effectively */
     uint32_t sum = w00 * p00 + w01 * p01 + w10 * p10 + w11 * p11;
     
-    /* Normalize: divide by 65536 (shift right by 16) */
-    uint8_t result = (uint8_t)(sum >> 16);
+    /* Normalize: divide by 65536 (shift right by 16) with rounding */
+    /* Add 0x8000 (0.5 in Q16) before shift for proper rounding */
+    uint8_t result = (uint8_t)((sum + 0x8000) >> 16);
     
     return result;
 }

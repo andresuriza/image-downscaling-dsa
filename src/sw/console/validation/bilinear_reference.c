@@ -1,9 +1,9 @@
 /**
  * @file bilinear_reference.c
- * @brief Reference C implementation of bilinear interpolation downscaling
+ * @brief Implementación de referencia en C de downscaling con interpolación bilineal
  * 
- * This implementation uses Q8.8 fixed-point arithmetic to match
- * the hardware implementation exactly for bit-accurate validation.
+ * Usa aritmética de punto fijo Q8.8 para coincidir exactamente con la
+ * implementación en hardware y permitir validación bit-accurate.
  */
 
 #include "bilinear_reference.h"
@@ -13,7 +13,11 @@
 #include <ctype.h>
 
 /*===========================================================================
- * Downscaling Implementation - Sequential Mode
+ * Implementación de Downscaling - Modo Sequential
+ * 
+ * Procesa pixel por pixel, calculando coordenadas source en Q8.8,
+ * extrayendo parte entera/fraccional, clamping de límites,
+ * y aplicando interpolación bilineal a 4 vecinos.
  *===========================================================================*/
 
 void downscale_bilinear_sequential(
@@ -30,49 +34,44 @@ void downscale_bilinear_sequential(
 ) {
     uint64_t flops = 0, reads = 0, writes = 0;
     
-    /* Inverse scale for mapping output to input coordinates */
-    /* inv_scale = 1.0 / scale = 256 / scale_q8_8 (in Q8.8) */
-    /* For better precision, we compute src = dst / scale directly */
-    
     for (uint32_t out_y = 0; out_y < out_height; out_y++) {
         for (uint32_t out_x = 0; out_x < out_width; out_x++) {
             
-            /* Calculate source coordinates in Q8.8 fixed-point */
-            /* src_x = out_x / scale = out_x * (1/scale) */
-            /* Using: src = out * 256 / scale_q8_8 */
+            /* Calcular coordenadas source en punto fijo Q8.8 */
+            /* src = (out << 16) / scale_q8_8 */
             uint32_t src_x_q8 = ((uint32_t)out_x << 16) / scale_q8_8;
             uint32_t src_y_q8 = ((uint32_t)out_y << 16) / scale_q8_8;
             
-            /* Extract integer and fractional parts */
+            /* Extraer parte entera (píxel base) y fraccional (pesos) */
             uint32_t src_x_int = src_x_q8 >> 8;
             uint32_t src_y_int = src_y_q8 >> 8;
             uint8_t frac_x = src_x_q8 & 0xFF;
             uint8_t frac_y = src_y_q8 & 0xFF;
             
-            /* Clamp to valid range */
+            /* Calcular coordenadas de vecinos con clamping a bordes */
             uint32_t x0 = src_x_int;
             uint32_t y0 = src_y_int;
             uint32_t x1 = (x0 + 1 < in_width) ? x0 + 1 : in_width - 1;
             uint32_t y1 = (y0 + 1 < in_height) ? y0 + 1 : in_height - 1;
             
-            /* Clamp coordinates to valid range */
+            /* Clamping de coordenadas base a rango válido */
             if (x0 >= in_width) x0 = in_width - 1;
             if (y0 >= in_height) y0 = in_height - 1;
             
-            /* Fetch 4 neighbor pixels */
+            /* Leer 4 píxeles vecinos (p00=top-left, p01=top-right, p10=bottom-left, p11=bottom-right) */
             uint8_t p00 = input[y0 * in_width + x0];
             uint8_t p01 = input[y0 * in_width + x1];
             uint8_t p10 = input[y1 * in_width + x0];
             uint8_t p11 = input[y1 * in_width + x1];
             reads += 4;
             
-            /* Perform bilinear interpolation */
+            /* Ejecutar interpolación bilineal: result = (1-fx)*(1-fy)*p00 + fx*(1-fy)*p01 + ... */
             uint8_t result = bilinear_interpolate(p00, p01, p10, p11, frac_x, frac_y);
             
-            /* Count FLOPs: 4 multiplies for weights, 4 multiplies for weighted pixels, 3 adds */
+            /* Contar FLOPs: 4 muls para pesos, 4 muls para píxeles ponderados, 3 sumas */
             flops += 11;
             
-            /* Write output pixel */
+            /* Escribir píxel de salida */
             output[out_y * out_width + out_x] = result;
             writes += 1;
         }
@@ -84,7 +83,11 @@ void downscale_bilinear_sequential(
 }
 
 /*===========================================================================
- * Downscaling Implementation - SIMD Mode
+ * Implementación de Downscaling - Modo SIMD
+ * 
+ * Procesa múltiples píxeles en paralelo (2/4/8 lanes).
+ * Calcula coordenadas source de todos los lanes, hace fetch de vecinos,
+ * ejecuta interpolación en paralelo, y escribe resultados.
  *===========================================================================*/
 
 void downscale_bilinear_simd(
@@ -102,13 +105,13 @@ void downscale_bilinear_simd(
 ) {
     uint64_t flops = 0, reads = 0, writes = 0;
     
-    /* Temporary arrays for SIMD processing */
+    /* Arrays temporales para procesamiento SIMD (máximo 8 lanes) */
     uint8_t p00[8], p01[8], p10[8], p11[8];
     uint8_t frac_x[8], frac_y[8];
     uint8_t results[8];
     
     for (uint32_t out_y = 0; out_y < out_height; out_y++) {
-        /* Process SIMD_LANES pixels at a time in X direction */
+        /* Procesar SIMD_LANES píxeles a la vez en dirección X */
         for (uint32_t out_x = 0; out_x < out_width; out_x += simd_lanes) {
             
             uint32_t lanes_this_iter = simd_lanes;
@@ -116,10 +119,11 @@ void downscale_bilinear_simd(
                 lanes_this_iter = out_width - out_x;
             }
             
-            /* Calculate source coordinates for all lanes */
+            /* Calcular coordenadas source para todos los lanes del batch */
             for (uint32_t lane = 0; lane < lanes_this_iter; lane++) {
                 uint32_t ox = out_x + lane;
                 
+                /* Calculate source coordinates in Q8.8 fixed-point */
                 uint32_t src_x_q8 = ((uint32_t)ox << 16) / scale_q8_8;
                 uint32_t src_y_q8 = ((uint32_t)out_y << 16) / scale_q8_8;
                 
@@ -136,7 +140,7 @@ void downscale_bilinear_simd(
                 if (x0 >= in_width) x0 = in_width - 1;
                 if (y0 >= in_height) y0 = in_height - 1;
                 
-                /* Fetch neighbor pixels */
+                /* Leer 4 píxeles vecinos para este lane */
                 p00[lane] = input[y0 * in_width + x0];
                 p01[lane] = input[y0 * in_width + x1];
                 p10[lane] = input[y1 * in_width + x0];
@@ -144,7 +148,7 @@ void downscale_bilinear_simd(
             }
             reads += lanes_this_iter * 4;
             
-            /* SIMD interpolation (all lanes in parallel) */
+            /* Interpolación SIMD (todos los lanes en paralelo) */
             for (uint32_t lane = 0; lane < lanes_this_iter; lane++) {
                 results[lane] = bilinear_interpolate(
                     p00[lane], p01[lane], p10[lane], p11[lane],
@@ -153,7 +157,7 @@ void downscale_bilinear_simd(
             }
             flops += lanes_this_iter * 11;
             
-            /* Write results */
+            /* Escribir resultados a memoria de salida */
             for (uint32_t lane = 0; lane < lanes_this_iter; lane++) {
                 output[out_y * out_width + out_x + lane] = results[lane];
             }

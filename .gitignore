@@ -27,7 +27,7 @@ temp/
 qdb/
 .qsys_edit/
 .qsys_sim/
-*.sof
+#*.sof
 *.pof
 *.jic
 *.rbf
@@ -88,3 +88,4 @@ ehthumbs.db
 
 *.pgm
 venv/
+work/

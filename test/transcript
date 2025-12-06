@@ -1,0 +1,68 @@
+# vsim -c work.downscaler_top_tb -L altera_mf_ver -do "run -all; quit -f" 
+# Start time: 11:46:51 on Dec 05,2025
+# Loading sv_std.std
+# Loading work.downscaler_top_tb
+# Loading work.downscaler_top
+# Loading work.accelerator_csr_bridge
+# Loading work.pixel_fetch_fsm
+# Loading work.simd_downscaler
+# Loading work.downscaling_serial
+# run -all
+# 
+# 
+# =============================================
+#   Downscaler Top Integration Testbench
+#   LANES=8, Q=8
+# =============================================
+# 
+# ========================================
+# === TEST: CSR Register Access ===
+# ========================================
+# [TB] PASS: All CSR register tests passed
+# 
+# ========================================
+# === TEST: 8x8 -> 4x4 (Basic Downscale) ===
+# ========================================
+# [TB] Loaded 8x8 input image to SDRAM @ 0x00000000
+# [TB] Version: 0x00010300
+# [TB] Processing complete after 43 cycles
+# [TB] Progress: 0 pixels
+# [TB] FLOPs: 0
+# [TB] Cycles: 217
+# [TB] Read 4x4 output image from SDRAM @ 0x00010000
+# [TB] PASS: All 16 pixels match reference
+# 
+# ========================================
+# === TEST: 16x16 -> 8x8 (Serial Module) ===
+# ========================================
+# [TB] Loaded 16x16 input image to SDRAM @ 0x00000000
+# [TB] Processing complete after 192 cycles
+# [TB] Progress: 0 pixels
+# [TB] FLOPs: 0
+# [TB] Cycles: 961
+# [TB] Read 8x8 output image from SDRAM @ 0x00010000
+# [TB] PASS: All 64 pixels match reference
+# 
+# ========================================
+# === TEST: 4x4 -> 2x2 (Stepping Mode) ===
+# ========================================
+# [TB] Step 0: FSM state=0, out_x=0
+# [TB] Step 1: FSM state=0, out_x=0
+# [TB] Step 2: FSM state=0, out_x=0
+# [TB] Step 3: FSM state=0, out_x=0
+# [TB] Step 4: FSM state=0, out_x=0
+# [TB] PASS: Stepping mode test complete
+# 
+# 
+# =============================================
+#   TEST SUMMARY
+# =============================================
+#   PASSED: 4
+#   FAILED: 0
+#   Total pixel mismatches: 0
+# =============================================
+#   *** ALL TESTS PASSED ***
+# ** Note: $finish    : tb/downscaler_top_tb.sv(707)
+#    Time: 28330 ns  Iteration: 1  Instance: /downscaler_top_tb
+# End time: 11:46:51 on Dec 05,2025, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
