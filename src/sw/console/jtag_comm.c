@@ -1,8 +1,9 @@
 /*
- * JTAG Communication Implementation - Persistent Mode
+ * Comunicación JTAG - Modo Persistente
  * 
- * Keeps system-console running as a subprocess and communicates via pipes.
- * This avoids the 2-3 second JVM startup overhead per command.
+ * Mantiene system-console corriendo como subproceso y comunica vía pipes.
+ * Evita el overhead de inicio de JVM (2-3 segundos) en cada comando.
+ * Optimizado para Windows (WriteFile/ReadFile) y Linux (read/write).
  */
 
 #include <stdio.h>
@@ -21,29 +22,23 @@
 
 #include "jtag_comm.h"
 
-/*===========================================================================
- * Persistent Process State
- *===========================================================================*/
-
+/* Estado del subproceso system-console persistente */
 typedef struct {
 #ifdef _WIN32
-    HANDLE hProcess;
-    HANDLE hStdinWrite;
-    HANDLE hStdoutRead;
+    HANDLE hProcess;      // Handle del proceso system-console
+    HANDLE hStdinWrite;   // Pipe de escritura (envía comandos)
+    HANDLE hStdoutRead;   // Pipe de lectura (recibe respuestas)
 #else
-    pid_t pid;
-    int stdin_fd;
-    int stdout_fd;
+    pid_t pid;            // PID del proceso hijo
+    int stdin_fd;         // File descriptor de stdin del hijo
+    int stdout_fd;        // File descriptor de stdout del hijo
 #endif
-    bool active;
+    bool active;          // Si el proceso está corriendo
 } jtag_process_t;
 
 static jtag_process_t g_proc = {0};
 
-/*===========================================================================
- * Error Handling
- *===========================================================================*/
-
+/* Mensajes de error legibles para cada código JTAG_ERR_* */
 static const char* error_messages[] = {
     "OK",
     "Failed to open JTAG connection",
@@ -66,12 +61,9 @@ void jtag_set_verbose(jtag_ctx_t *ctx, int level) {
     if (ctx) ctx->verbose = level;
 }
 
-/*===========================================================================
- * Windows Pipe Implementation
- *===========================================================================*/
-
 #ifdef _WIN32
 
+/* Escribir comando al pipe de stdin de system-console (Windows) */
 static int write_to_pipe(const char *data) {
     if (!g_proc.active) return JTAG_ERR_NOT_OPEN;
     
@@ -80,10 +72,14 @@ static int write_to_pipe(const char *data) {
     if (!WriteFile(g_proc.hStdinWrite, data, len, &written, NULL)) {
         return JTAG_ERR_WRITE;
     }
-    FlushFileBuffers(g_proc.hStdinWrite);
+    FlushFileBuffers(g_proc.hStdinWrite);  // Forzar envío inmediato
     return JTAG_OK;
 }
 
+/* Leer respuesta del pipe de stdout de system-console (Windows)
+ * Acumula datos hasta encontrar prompt '% ' o alcanzar timeout
+ * timeout_ms: tiempo máximo de espera (-1 = infinito)
+ */
 static int read_from_pipe(char *buffer, size_t buf_size, int timeout_ms) {
     if (!g_proc.active) return JTAG_ERR_NOT_OPEN;
     
@@ -94,7 +90,7 @@ static int read_from_pipe(char *buffer, size_t buf_size, int timeout_ms) {
     buffer[0] = '\0';
     
     while (total < buf_size - 1) {
-        /* Check for timeout */
+        /* Verificar timeout */
         if (timeout_ms > 0 && (GetTickCount() - start) > (DWORD)timeout_ms) {
             return JTAG_ERR_TIMEOUT;
         }
@@ -136,6 +132,13 @@ static int read_from_pipe(char *buffer, size_t buf_size, int timeout_ms) {
     return JTAG_OK;
 }
 
+/* Arrancar proceso system-console con pipes redirigidos (Windows)
+ * Pasos:
+ * 1. Crear pipes stdin/stdout con herencia habilitada
+ * 2. Construir ruta absoluta a jtag_server.tcl (en directorio del .exe)
+ * 3. Crear proceso con CreateProcess (sin ventana)
+ * 4. Guardar handles en g_proc para comunicación posterior
+ */
 static int start_server_process(jtag_ctx_t *ctx) {
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -145,13 +148,13 @@ static int start_server_process(jtag_ctx_t *ctx) {
     HANDLE hStdinRead, hStdinWrite;
     HANDLE hStdoutRead, hStdoutWrite;
 
-    /* Create stdin pipe */
+    /* Crear pipes para stdin (consola escribe comandos) */
     if (!CreatePipe(&hStdinRead, &hStdinWrite, &sa, 0)) {
         return JTAG_ERR_OPEN;
     }
     SetHandleInformation(hStdinWrite, HANDLE_FLAG_INHERIT, 0);
 
-    /* Create stdout pipe */
+    /* Crear pipe para stdout (consola lee respuestas) */
     if (!CreatePipe(&hStdoutRead, &hStdoutWrite, &sa, 0)) {
         CloseHandle(hStdinRead);
         CloseHandle(hStdinWrite);
@@ -159,7 +162,7 @@ static int start_server_process(jtag_ctx_t *ctx) {
     }
     SetHandleInformation(hStdoutRead, HANDLE_FLAG_INHERIT, 0);
 
-    /* Get path to jtag_server.tcl (same directory as executable) */
+    /* Obtener ruta a jtag_server.tcl (mismo directorio que dsa_console.exe) */
     char exe_path[MAX_PATH];
     char tcl_path[MAX_PATH + 32];
     GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
@@ -171,7 +174,7 @@ static int start_server_process(jtag_ctx_t *ctx) {
         strcpy(tcl_path, "jtag_server.tcl");
     }
 
-    /* Build command line */
+    /* Construir línea de comando: system-console.exe --script=jtag_server.tcl */
     char cmd[MAX_PATH * 3];
     snprintf(cmd, sizeof(cmd), 
              "\"%s\\sopc_builder\\bin\\system-console.exe\" --script=\"%s\"",
@@ -181,6 +184,7 @@ static int start_server_process(jtag_ctx_t *ctx) {
         printf("[JTAG] Starting: %s\n", cmd);
     }
 
+    /* Configurar STARTUPINFO para redirigir stdin/stdout del proceso hijo */
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
@@ -192,6 +196,7 @@ static int start_server_process(jtag_ctx_t *ctx) {
 
     ZeroMemory(&pi, sizeof(pi));
 
+    /* Crear proceso sin ventana, heredando handles de pipes */
     if (!CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 
                         CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         CloseHandle(hStdinRead);
@@ -201,11 +206,12 @@ static int start_server_process(jtag_ctx_t *ctx) {
         return JTAG_ERR_OPEN;
     }
 
-    /* Close unused handles */
+    /* Cerrar handles que el padre no necesita (el hijo los heredó) */
     CloseHandle(hStdinRead);
     CloseHandle(hStdoutWrite);
     CloseHandle(pi.hThread);
 
+    /* Guardar handles de comunicación en estructura global */
     g_proc.hProcess = pi.hProcess;
     g_proc.hStdinWrite = hStdinWrite;
     g_proc.hStdoutRead = hStdoutRead;
@@ -214,13 +220,19 @@ static int start_server_process(jtag_ctx_t *ctx) {
     return JTAG_OK;
 }
 
+/* Detener proceso system-console (Windows)
+ * 1. Enviar comando QUIT (cierre graceful)
+ * 2. Esperar 1s para que termine
+ * 3. Forzar terminación si aún está activo
+ * 4. Liberar todos los handles
+ */
 static void stop_server_process(void) {
     if (!g_proc.active) return;
 
-    /* Send quit command */
+    /* Enviar comando QUIT para cierre graceful */
     write_to_pipe("QUIT\n");
     
-    /* Wait briefly for graceful exit */
+    /* Esperar brevemente que el proceso termine */
     WaitForSingleObject(g_proc.hProcess, 1000);
     TerminateProcess(g_proc.hProcess, 0);
 
@@ -232,7 +244,7 @@ static void stop_server_process(void) {
 }
 
 #else
-/* Linux/Unix implementation placeholder */
+/* Implementación Linux/Unix (placeholder - no implementado) */
 static int write_to_pipe(const char *data) { (void)data; return JTAG_ERR_NOT_OPEN; }
 static int read_from_pipe(char *buffer, size_t buf_size, int timeout_ms) { 
     (void)buffer; (void)buf_size; (void)timeout_ms; return JTAG_ERR_NOT_OPEN; 
@@ -242,9 +254,13 @@ static void stop_server_process(void) {}
 #endif
 
 /*===========================================================================
- * Command Execution
+ * Ejecución de Comandos JTAG
  *===========================================================================*/
 
+/* Enviar comando al servidor TCL y leer respuesta
+ * Timeout: 10s para comandos normales
+ * Verifica si la respuesta empieza con ERROR
+ */
 static int send_command(jtag_ctx_t *ctx, const char *cmd, char *response, size_t resp_size) {
     if (!g_proc.active) return JTAG_ERR_NOT_OPEN;
     
@@ -262,7 +278,7 @@ static int send_command(jtag_ctx_t *ctx, const char *cmd, char *response, size_t
         printf("[JTAG] << %s\n", response);
     }
     
-    /* Check for error in response */
+    /* Verificar si la respuesta indica error */
     if (strncmp(response, "ERROR", 5) == 0) {
         return JTAG_ERR_READ;
     }
@@ -271,13 +287,19 @@ static int send_command(jtag_ctx_t *ctx, const char *cmd, char *response, size_t
 }
 
 /*===========================================================================
- * Public API
+ * API Pública JTAG
  *===========================================================================*/
 
+/* Abrir conexión JTAG:
+ * 1. Aplicar defaults de rutas si no están configuradas
+ * 2. Arrancar proceso system-console persistente
+ * 3. Esperar mensaje de conexión (timeout 20s para inicio de JVM)
+ * 4. Verificar JTAG_OK en respuesta (ignora banner de system-console)
+ */
 int jtag_open(jtag_ctx_t *ctx) {
     if (!ctx) return JTAG_ERR_OPEN;
 
-    /* Set defaults if not specified */
+    /* Aplicar defaults si no están especificados */
     if (ctx->quartus_path[0] == '\0') {
         strncpy(ctx->quartus_path, QUARTUS_PATH, sizeof(ctx->quartus_path) - 1);
     }
@@ -285,13 +307,13 @@ int jtag_open(jtag_ctx_t *ctx) {
         strncpy(ctx->master_path, DEFAULT_MASTER_PATH, sizeof(ctx->master_path) - 1);
     }
 
-    /* Start the persistent server process */
+    /* Arrancar proceso persistente (system-console + jtag_server.tcl) */
     int ret = start_server_process(ctx);
     if (ret != JTAG_OK) {
         return ret;
     }
 
-    /* Wait for connection message - skip banner, look for JTAG_OK */
+    /* Leer mensaje de conexión (saltar banner de system-console, buscar JTAG_OK) */
     char response[4096];
     ret = read_from_pipe(response, sizeof(response), 20000);  /* 20s for JVM startup */
     if (ret != JTAG_OK) {
@@ -299,13 +321,13 @@ int jtag_open(jtag_ctx_t *ctx) {
         return ret;
     }
 
-    /* Find JTAG_OK in the response (ignoring banner) */
+    /* Buscar JTAG_OK en respuesta (ignorar banner de system-console) */
     char *ok_msg = strstr(response, "JTAG_OK");
     if (ctx->verbose && ok_msg) {
         printf("[JTAG] Server: %s\n", ok_msg);
     }
 
-    /* Check connection succeeded */
+    /* Verificar que la conexión fue exitosa */
     if (ok_msg == NULL) {
         if (ctx->verbose) {
             printf("[JTAG] Response: %s\n", response);
@@ -354,14 +376,19 @@ int jtag_write_32(jtag_ctx_t *ctx, uint32_t addr, uint32_t value) {
     return send_command(ctx, cmd, response, sizeof(response));
 }
 
-/* Maximum bytes per READMEM command - limit to keep response buffer manageable */
+/* Máximo de bytes por comando READMEM - limitar tamaño de buffer de respuesta */
 #define READ_CHUNK_SIZE 256
 
+/* Leer bloque de memoria en chunks:
+ * - Divide transferencia en bloques de 256 bytes
+ * - Parsea respuesta con bytes en hexadecimal separados por espacios
+ * - Muestra progreso cada 4KB en transferencias grandes
+ */
 int jtag_read_block(jtag_ctx_t *ctx, uint32_t addr, uint8_t *data, size_t len) {
     if (!ctx || !data) return JTAG_ERR_NOT_OPEN;
 
     char cmd[64];
-    char response[READ_CHUNK_SIZE * 5 + 256];  /* Buffer for hex bytes + overhead */
+    char response[READ_CHUNK_SIZE * 5 + 256];  /* Buffer para bytes hex + overhead */
     size_t offset = 0;
     
     while (offset < len) {
@@ -372,7 +399,7 @@ int jtag_read_block(jtag_ctx_t *ctx, uint32_t addr, uint8_t *data, size_t len) {
         int ret = send_command(ctx, cmd, response, sizeof(response));
         if (ret != JTAG_OK) return ret;
         
-        /* Parse space-separated hex bytes */
+        /* Parsear bytes hexadecimales separados por espacios */
         char *tok = strtok(response, " \t\n\r");
         size_t i = 0;
         while (tok && i < chunk) {
@@ -382,7 +409,7 @@ int jtag_read_block(jtag_ctx_t *ctx, uint32_t addr, uint8_t *data, size_t len) {
         }
         
         if (i < chunk) {
-            /* Didn't get all expected bytes */
+            /* Error: no se recibieron todos los bytes esperados */
             return JTAG_ERR_READ;
         }
         
@@ -402,20 +429,26 @@ int jtag_read_block(jtag_ctx_t *ctx, uint32_t addr, uint8_t *data, size_t len) {
     return JTAG_OK;
 }
 
-/* Maximum bytes per WRITEMEM command - keep it reasonable for TCL parsing */
+/* Máximo de bytes por comando WRITEMEM - mantener razonable para parsing TCL */
 #define WRITE_CHUNK_SIZE 256
 
+/* Escribir bloque de memoria en chunks:
+ * - Divide transferencia en bloques de 256 bytes
+ * - Construye comando dinámico con lista de bytes en hex
+ * - Libera memoria del comando después de cada chunk
+ * - Muestra progreso cada 4KB
+ */
 int jtag_write_block(jtag_ctx_t *ctx, uint32_t addr, const uint8_t *data, size_t len) {
     if (!ctx || !data) return JTAG_ERR_NOT_OPEN;
 
     char response[256];
     size_t offset = 0;
     
-    /* Process in chunks */
+    /* Procesar en chunks de 256 bytes */
     while (offset < len) {
         size_t chunk = (len - offset > WRITE_CHUNK_SIZE) ? WRITE_CHUNK_SIZE : (len - offset);
         
-        /* Build command: WRITEMEM addr byte0 byte1 ... */
+        /* Construir comando dinámico: WRITEMEM addr 0x00 0x01 ... */
         char *cmd = malloc(chunk * 5 + 64);
         if (!cmd) return JTAG_ERR_WRITE;
         

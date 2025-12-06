@@ -1,24 +1,24 @@
 /**
  * @file validate.c
- * @brief DSA Downscaler Validation Tool
+ * @brief Herramienta de Validación del DSA Downscaler
  * 
- * Validates FPGA output against C reference model using bit-accurate
- * Q8.8 fixed-point bilinear interpolation.
+ * Valida salida de FPGA contra modelo de referencia en C usando
+ * interpolación bilineal bit-accurate con punto fijo Q8.8.
  * 
- * Usage:
+ * Uso:
  *   validate <input.pgm> <fpga_output.pgm> [-s scale] [-m mode] [-l lanes]
  *   validate --generate <input.pgm> <reference.pgm> [-s scale] [-m mode] [-l lanes]
  *   validate --batch <test_dir> <output_dir> [-s scale]
  * 
- * Options:
- *   -s, --scale <float>    Scale factor (0.5-1.0), default: 0.5
- *   -m, --mode <mode>      Mode: sequential or simd, default: sequential
- *   -l, --lanes <n>        SIMD lanes (2,4,8), default: 8
- *   -v, --verbose          Verbose output
- *   -r, --reference <file> Save reference image
- *   -d, --diff <file>      Save difference image
- *   --generate             Generate reference image only
- *   --batch                Batch validation mode
+ * Opciones:
+ *   -s, --scale <float>    Factor de escala (0.5-1.0), default: 0.5
+ *   -m, --mode <mode>      Modo: sequential o simd, default: sequential
+ *   -l, --lanes <n>        Lanes SIMD (2,4,8), default: 8
+ *   -v, --verbose          Salida verbose
+ *   -r, --reference <file> Guardar imagen de referencia
+ *   -d, --diff <file>      Guardar imagen de diferencias
+ *   --generate             Generar solo imagen de referencia
+ *   --batch                Modo validación batch
  */
 
 #include <stdio.h>
@@ -31,7 +31,7 @@
 #include "bilinear_reference.h"
 
 /*===========================================================================
- * Configuration
+ * Configuración y Parámetros
  *===========================================================================*/
 
 typedef struct {
@@ -43,13 +43,13 @@ typedef struct {
     int mode;           /* 0 = sequential, 1 = simd */
     int simd_lanes;
     int verbose;
-    int generate_only;
+    int generate_only;  /* solo generar referencia */
     int batch_mode;
     const char *batch_dir;
 } config_t;
 
 /*===========================================================================
- * Helper Functions
+ * Funciones Auxiliares
  *===========================================================================*/
 
 static void print_usage(const char *prog) {
@@ -71,11 +71,14 @@ static void print_usage(const char *prog) {
 }
 
 /*===========================================================================
- * Validation Function
+ * Función de Validación Principal
+ * 
+ * Carga input, genera referencia con modelo C, compara con FPGA output,
+ * calcula estadísticas de diferencias, y opcionalmente guarda imágenes.
  *===========================================================================*/
 
 static int validate_images(config_t *cfg) {
-    /* Load input image */
+    /* Cargar imagen de entrada */
     uint32_t in_width, in_height;
     uint8_t *input = load_pgm(cfg->input_file, &in_width, &in_height);
     if (!input) {

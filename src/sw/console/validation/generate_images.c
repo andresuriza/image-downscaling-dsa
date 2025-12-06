@@ -1,15 +1,15 @@
 /**
  * @file generate_images.c
- * @brief Test image generator for DSA Downscaler validation
+ * @brief Generador de imágenes de prueba para validación del DSA Downscaler
  * 
- * Generates various test patterns for validating the downscaler:
- * - Gradients (diagonal, horizontal, vertical)
- * - Checkerboard patterns
- * - Solid colors
- * - Noise
- * - Circles/Radial gradients
+ * Genera varios patrones de prueba para validar el downscaler:
+ * - Gradientes (diagonal, horizontal, vertical)
+ * - Patrones de checkerboard
+ * - Colores sólidos
+ * - Ruido
+ * - Círculos/Gradientes radiales
  * 
- * Usage:
+ * Uso:
  *   generate_images <output_dir> [--sizes 8,16,32,64,128,256,512]
  */
 
@@ -23,10 +23,10 @@
 #include "bilinear_reference.h"
 
 /*===========================================================================
- * Pattern Generators
+ * Generadores de Patrones de Prueba
  *===========================================================================*/
 
-/* Diagonal gradient */
+/* Gradiente diagonal (esquina superior izquierda a inferior derecha) */
 static void generate_gradient(uint8_t *img, uint32_t size) {
     for (uint32_t y = 0; y < size; y++) {
         for (uint32_t x = 0; x < size; x++) {
@@ -35,7 +35,7 @@ static void generate_gradient(uint8_t *img, uint32_t size) {
     }
 }
 
-/* Horizontal gradient */
+/* Gradiente horizontal (negro a blanco de izquierda a derecha) */
 static void generate_hgradient(uint8_t *img, uint32_t size) {
     for (uint32_t y = 0; y < size; y++) {
         for (uint32_t x = 0; x < size; x++) {
@@ -44,7 +44,7 @@ static void generate_hgradient(uint8_t *img, uint32_t size) {
     }
 }
 
-/* Vertical gradient */
+/* Gradiente vertical (negro a blanco de arriba a abajo) */
 static void generate_vgradient(uint8_t *img, uint32_t size) {
     for (uint32_t y = 0; y < size; y++) {
         for (uint32_t x = 0; x < size; x++) {
@@ -53,7 +53,7 @@ static void generate_vgradient(uint8_t *img, uint32_t size) {
     }
 }
 
-/* Checkerboard pattern */
+/* Patrón de tablero de ajedrez (bloques alternados blanco/negro) */
 static void generate_checker(uint8_t *img, uint32_t size, uint32_t block_size) {
     for (uint32_t y = 0; y < size; y++) {
         for (uint32_t x = 0; x < size; x++) {
@@ -64,7 +64,7 @@ static void generate_checker(uint8_t *img, uint32_t size, uint32_t block_size) {
     }
 }
 
-/* Horizontal bars */
+/* Barras horizontales alternadas (8 barras) */
 static void generate_hbars(uint8_t *img, uint32_t size) {
     uint32_t bar_height = size / 8;
     for (uint32_t y = 0; y < size; y++) {
@@ -75,7 +75,7 @@ static void generate_hbars(uint8_t *img, uint32_t size) {
     }
 }
 
-/* Vertical bars */
+/* Barras verticales alternadas (8 barras) */
 static void generate_vbars(uint8_t *img, uint32_t size) {
     uint32_t bar_width = size / 8;
     for (uint32_t y = 0; y < size; y++) {

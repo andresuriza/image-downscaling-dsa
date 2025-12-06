@@ -1,21 +1,20 @@
 /*
- * DSA Downscaler Console - Main Application
- * GDB-style interactive console for controlling image downscaling accelerator
+ * DSA Downscaler Console - Aplicación interactiva estilo GDB
+ * Control del acelerador de downscaling de imágenes vía JTAG
  * 
- * Commands:
- *   connect                     - Connect to FPGA via JTAG
- *   disconnect                  - Close JTAG connection
- *   set <param> <value>         - Set configuration parameter
- *   show <what>                 - Show status/config/perf
- *   run                         - Start processing
- *   step                        - Execute one step
- *   continue                    - Continue from pause
- *   abort                       - Abort current operation
- *   load <file>                 - Load input image
- *   dump <file>                 - Dump output image
- *   compare <file>              - Compare output with reference
- *   help                        - Show this help
- *   quit/exit                   - Exit console
+ * Comandos principales:
+ *   connect/disconnect  - Conexión JTAG
+ *   load <file.pgm>     - Cargar imagen de entrada
+ *   set scale <0.5-1.0> - Factor de escala
+ *   set mode simd|serial- Modo de procesamiento
+ *   set delay <us>      - Delay entre steps (0=clock normal)
+ *   run                 - Iniciar procesamiento
+ *   step                - Ejecutar un paso (debug)
+ *   continue            - Continuar en modo stepping
+ *   dump <file.pgm>     - Guardar imagen de salida
+ *   compare [ref.pgm]   - Validar vs modelo C
+ *   show config|perf|debug - Ver estado
+ *   help/quit           - Ayuda/salir
  */
 
 #include <stdio.h>
@@ -37,30 +36,25 @@
 #include "jtag_comm.h"
 #include "validation/bilinear_reference.h"
 
-/*===========================================================================
- * Console State
- *===========================================================================*/
+/* Estado global de la consola */
 typedef struct {
-    jtag_ctx_t jtag;
-    uint32_t img_width;
-    uint32_t img_height;
-    float scale;
-    int mode;           // 0=SIMD (4 lanes), 1=Serial
-    bool configured;
-    bool stepping_active; // Stepping mode is active
-    uint32_t step_delay_us; // Delay between steps in microseconds (0 = use normal clock)
-    uint8_t *input_image;
-    uint8_t *output_image;
-    size_t input_size;
-    size_t output_size;
+    jtag_ctx_t jtag;            // Contexto de comunicación JTAG
+    uint32_t img_width;         // Ancho de imagen de entrada
+    uint32_t img_height;        // Alto de imagen de entrada
+    float scale;                // Factor de escala (0.5-1.0)
+    int mode;                   // 0=SIMD (4 lanes), 1=Serial
+    bool configured;            // Si está configurado
+    bool stepping_active;       // Modo stepping activo
+    uint32_t step_delay_us;     // Delay entre steps en microsegundos (0=clock normal)
+    uint8_t *input_image;       // Buffer de imagen de entrada
+    uint8_t *output_image;      // Buffer de imagen de salida
+    size_t input_size;          // Tamaño del buffer de entrada
+    size_t output_size;         // Tamaño del buffer de salida
 } console_state_t;
 
 static console_state_t g_state = {0};
 
-/*===========================================================================
- * Image I/O (Simple PGM format for grayscale)
- *===========================================================================*/
-
+/* Cargar imagen PGM (P2=ASCII o P5=binario) */
 static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width, uint32_t *height) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
@@ -70,7 +64,7 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
 
     char magic[3];
     int w, h, maxval;
-    int is_binary;
+    int is_binary;  // 1=P5 (binario), 0=P2 (ASCII)
     
     if (fscanf(fp, "%2s", magic) != 1) {
         printf("Error: Cannot read PGM magic number\n");
@@ -88,18 +82,18 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
         return -1;
     }
 
-    /* Skip whitespace and comments until we get to width */
+    /* Saltar espacios y comentarios hasta encontrar width */
     int c;
     for (;;) {
-        /* Skip whitespace */
+        /* Saltar espacios en blanco */
         while ((c = fgetc(fp)) != EOF && (c == ' ' || c == '\t' || c == '\n' || c == '\r'));
         if (c == EOF) break;
         
         if (c == '#') {
-            /* Skip comment line */
+            /* Saltar línea de comentario */
             while ((c = fgetc(fp)) != EOF && c != '\n');
         } else {
-            /* Found a non-comment character, put it back */
+            /* Encontrado carácter no-comentario, devolverlo al stream */
             ungetc(c, fp);
             break;
         }
@@ -111,7 +105,7 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
         return -1;
     }
     
-    /* Skip whitespace and comments before maxval */
+    /* Saltar espacios y comentarios antes de maxval */
     for (;;) {
         while ((c = fgetc(fp)) != EOF && (c == ' ' || c == '\t' || c == '\n' || c == '\r'));
         if (c == EOF) break;
@@ -130,7 +124,7 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
         return -1;
     }
     
-    /* Skip single whitespace after header (for P5) or any whitespace (for P2) */
+    /* Saltar un espacio después del header (P5) o cualquier espacio (P2) */
     c = fgetc(fp);
     if (!is_binary) {
         while (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
@@ -154,7 +148,7 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
     }
 
     if (is_binary) {
-        /* P5: Binary format - read raw bytes */
+        /* P5: formato binario - leer bytes crudos */
         if (fread(*data, 1, size, fp) != size) {
             printf("Error: Failed to read image data\n");
             free(*data);
@@ -163,7 +157,7 @@ static int load_pgm_image(const char *filename, uint8_t **data, uint32_t *width,
             return -1;
         }
     } else {
-        /* P2: ASCII format - read decimal values */
+        /* P2: formato ASCII - leer valores decimales */
         for (size_t i = 0; i < size; i++) {
             int val;
             if (fscanf(fp, "%d", &val) != 1) {
@@ -196,9 +190,7 @@ static int save_pgm_image(const char *filename, const uint8_t *data, uint32_t wi
     return 0;
 }
 
-/*===========================================================================
- * DSA Operations
- *===========================================================================*/
+/* Operaciones básicas con registros CSR del acelerador */
 
 static int dsa_read_csr(uint32_t offset, uint32_t *value) {
     return jtag_read_32(&g_state.jtag, CSR_ADDR(offset), value);
@@ -279,16 +271,17 @@ static void dsa_print_perf(void) {
     }
 }
 
+/* Nombres de estados de la FSM (coinciden con pixel_fetch_fsm.sv) */
 static const char* fsm_state_name(uint32_t state) {
     static const char* names[] = {
-        "IDLE",       // 0 - S_IDLE
-        "COMPUTE",    // 1 - S_COMPUTE (compute source coords)
-        "FETCH",      // 2 - S_FETCH (fetch 4 neighbor pixels)
-        "PROCESS",    // 3 - S_PROCESS (wait for downscaler)
-        "WRITE",      // 4 - S_WRITE (write result)
-        "NEXT",       // 5 - S_NEXT (advance to next pixel)
-        "DONE",       // 6 - S_DONE
-        "WAIT_STEP"   // 7 - S_WAIT_STEP (stepping mode pause)
+        "IDLE",       // 0 - Inactivo
+        "COMPUTE",    // 1 - Calcular coordenadas fuente
+        "FETCH",      // 2 - Leer píxeles vecinos de SDRAM
+        "PROCESS",    // 3 - Esperar resultado del downscaler
+        "WRITE",      // 4 - Escribir resultado a SDRAM
+        "NEXT",       // 5 - Avanzar al siguiente píxel
+        "DONE",       // 6 - Finalizado
+        "WAIT_STEP"   // 7 - Pausado en modo stepping
     };
     if (state < sizeof(names)/sizeof(names[0])) {
         return names[state];
@@ -357,10 +350,7 @@ static void dsa_print_debug(void) {
     }
 }
 
-/*===========================================================================
- * Command Handlers
- *===========================================================================*/
-
+/* Mostrar ayuda de comandos */
 static void cmd_help(void) {
     printf("\n=== DSA Console ===\n");
     printf("  connect / disconnect   JTAG connection\n");
@@ -421,10 +411,10 @@ static void cmd_set(const char *param, const char *value) {
             return;
         }
         
-        /* Round to nearest 0.05 step */
+        /* Redondear a pasos de 0.05 (0.50, 0.55, 0.60, ..., 1.00) */
         s = ((int)(s * 20 + 0.5f)) / 20.0f;
         
-        /* Clamp after rounding */
+        /* Clamp después del redondeo */
         if (s < 0.5f) s = 0.5f;
         if (s > 1.0f) s = 1.0f;
         
@@ -432,7 +422,7 @@ static void cmd_set(const char *param, const char *value) {
         uint32_t scale_q = FLOAT_TO_Q8_8(s);
         dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
         
-        /* Recalculate output dimensions when scale changes */
+        /* Recalcular dimensiones de salida al cambiar escala */
         uint32_t out_w = (uint32_t)(g_state.img_width * s);
         uint32_t out_h = (uint32_t)(g_state.img_height * s);
         dsa_write_csr(CSR_OUT_WIDTH, out_w);
@@ -466,15 +456,15 @@ static void cmd_set(const char *param, const char *value) {
     }
 }
 
-/* Cross-platform sleep function (microseconds) */
+/* Sleep multiplataforma en microsegundos */
 static void sleep_us(uint32_t us) {
 #ifdef _WIN32
-    /* Windows doesn't have usleep, use busy-wait for short delays */
+    /* Windows no tiene usleep, usar busy-wait para delays cortos */
     if (us == 0) return;
     if (us >= 1000) {
-        Sleep(us / 1000);
+        Sleep(us / 1000);  // Sleep de Windows usa milisegundos
     } else {
-        /* For sub-millisecond, use QueryPerformanceCounter busy-wait */
+        /* Para sub-milisegundo, usar busy-wait con QueryPerformanceCounter */
         LARGE_INTEGER freq, start, now;
         QueryPerformanceFrequency(&freq);
         QueryPerformanceCounter(&start);
@@ -501,7 +491,10 @@ static int key_pressed(void) {
 #endif
 }
 
-/* Run stepping loop until done or user abort */
+/* Ejecutar loop de stepping hasta completar o abortar usuario
+ * Optimizado con batching: envía múltiples steps antes de verificar status
+ * para reducir overhead de JTAG (~20-50ms por comando en Windows)
+ */
 static void stepping_loop(void) {
     uint32_t out_w = 0, out_h = 0, progress = 0, status = 0;
     dsa_read_csr(CSR_OUT_WIDTH, &out_w);
@@ -510,21 +503,26 @@ static void stepping_loop(void) {
     uint32_t last_progress = 0;
     uint32_t step_count = 0;
     
+    /* batch_size: agrupar steps para reducir overhead de JTAG
+     * delay >= 1ms: 1 step/vez (el delay domina)
+     * delay < 1ms:  100 steps/vez (overhead JTAG domina)
+     */
     uint32_t batch_size = (g_state.step_delay_us >= 1000) ? 1 : 100;
-    uint32_t status_check_interval = 100;
+    uint32_t status_check_interval = 100;  // Verificar cada 100 steps
     
     while (1) {
-        /* Send batch of step pulses */
+        /* Enviar batch de pulsos step_once */
         for (uint32_t i = 0; i < batch_size; i++) {
             dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
             step_count++;
             
+            /* Solo delay si es >= 1ms (sino el overhead JTAG ya es suficiente) */
             if (g_state.step_delay_us >= 1000) {
                 sleep_us(g_state.step_delay_us);
             }
         }
         
-        /* Check status periodically */
+        /* Verificar status periódicamente (no en cada step) */
         if (step_count % status_check_interval == 0 || step_count < 10) {
             dsa_read_csr(CSR_STATUS, &status);
             dsa_read_csr(CSR_PROGRESS, &progress);
@@ -563,21 +561,23 @@ static void cmd_run(void) {
         return;
     }
 
-    /* Reset first */
+    /* Reset antes de iniciar */
     dsa_write_csr(CSR_CTRL, CTRL_RESET);
     dsa_write_csr(CSR_CTRL, 0);
     
-    /* If step_delay is configured, use controlled stepping to avoid metastability */
+    /* Si step_delay está configurado, usar modo stepping controlado
+     * para evitar metaestabilidad por clock de 10MHz muy rápido
+     */
     if (g_state.step_delay_us > 0) {
         printf("Running (stepping mode, press key to pause)...\n");
         
-        /* Start in stepping mode */
+        /* Iniciar en modo stepping (step_enable=1) */
         dsa_write_csr(CSR_CTRL, CTRL_START | CTRL_STEP_ENABLE);
         g_state.stepping_active = true;
         
         stepping_loop();
     } else {
-        /* Normal run with system clock (use 'step' command for stepping mode) */
+        /* Modo normal con clock del sistema (no usar si hay metaestabilidad) */
         dsa_write_csr(CSR_CTRL, CTRL_START);
         g_state.stepping_active = false;
         printf("Started processing (normal clock mode)...\n");
@@ -590,20 +590,20 @@ static void cmd_step(void) {
         return;
     }
 
-    /* Check if stepping is active */
+    /* Verificar si stepping está activo */
     if (!g_state.stepping_active) {
-        /* Not in stepping mode - start in stepping mode */
+        /* No está en modo stepping - activar automáticamente */
         dsa_write_csr(CSR_CTRL, CTRL_RESET);
         dsa_write_csr(CSR_CTRL, 0);
         dsa_write_csr(CSR_CTRL, CTRL_START | CTRL_STEP_ENABLE);
         g_state.stepping_active = true;
         printf("Stepping mode started.\n");
     } else {
-        /* Already in stepping mode - send step pulse */
+        /* Ya en modo stepping - enviar un pulso step_once */
         dsa_write_csr(CSR_CTRL, CTRL_STEP_ENABLE | CTRL_STEP_ONCE);
     }
     
-    /* Read essential debug info */
+    /* Leer info esencial de debug */
     uint32_t dbg_fsm = 0, dbg_out_y_reg = 0, progress = 0, out_w = 0, out_h = 0, status = 0;
     
     dsa_read_csr(CSR_STATUS, &status);
@@ -634,11 +634,11 @@ static void cmd_step(void) {
     uint32_t out_y = dbg_out_y_reg & 0xFFFF;
     uint32_t num_lanes = (g_state.mode == MODE_SIMD) ? 4 : 1;
     
-    /* Print header with progress, output coords */
+    /* Imprimir encabezado: progreso, coordenadas salida, estado FSM */
     printf("[%u/%u] out(%u,%u) | %s\n",
            progress, total_pixels, out_x, out_y, fsm_state_name(fsm_state));
     
-    /* Print per-lane details */
+    /* Imprimir detalles por lane: coords fuente, fracciones, píxeles vecinos */
     for (uint32_t i = 0; i < num_lanes; i++) {
         uint32_t src_x = lane_coord[i] & 0xFFFF;
         uint32_t src_y = (lane_coord[i] >> 16) & 0xFFFF;
@@ -675,18 +675,19 @@ static void cmd_load(const char *filename) {
 
     printf("Loaded image: %ux%u\n", w, h);
 
-    /* Update dimensions in accelerator */
+    /* Actualizar dimensiones en acelerador */
     g_state.img_width = w;
     g_state.img_height = h;
     dsa_write_csr(CSR_IN_WIDTH, w);
     dsa_write_csr(CSR_IN_HEIGHT, h);
 
+    /* Calcular dimensiones de salida según escala actual */
     uint32_t out_w = (uint32_t)(w * g_state.scale);
     uint32_t out_h = (uint32_t)(h * g_state.scale);
     dsa_write_csr(CSR_OUT_WIDTH, out_w);
     dsa_write_csr(CSR_OUT_HEIGHT, out_h);
 
-    /* Write scale */
+    /* Escribir factor de escala en Q8.8 */
     uint32_t scale_q = FLOAT_TO_Q8_8(g_state.scale);
     dsa_write_csr(CSR_SCALE_Q8_8, scale_q);
 
@@ -733,7 +734,7 @@ static void cmd_verify(void) {
         return;
     }
 
-    /* Compare byte by byte */
+    /* Comparar byte a byte con la imagen original */
     uint32_t mismatch_count = 0;
     uint32_t first_mismatch_idx = 0;
     uint8_t first_expected = 0, first_got = 0;
@@ -762,7 +763,7 @@ static void cmd_verify(void) {
         printf("First error at byte %u: expected 0x%02X, got 0x%02X\n",
                first_mismatch_idx, first_expected, first_got);
         
-        /* Show first few mismatches */
+        /* Mostrar primeros errores (máximo 5) */
         printf("\nFirst mismatches:\n");
         int shown = 0;
         for (size_t i = 0; i < size && shown < 5; i++) {
