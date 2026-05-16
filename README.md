@@ -11,7 +11,25 @@ A hardware acclerator designed to be synthesized on a De1-SoC FPGA for the purpo
 
 ## Features
 
+You will find various tools like:
+
+- **Accelerator CPU**: with this CPU that runs on the FPGA you will be able to apply downscaling to an image to your desired resolution, using sequential or parallel mode.
+  
+- **Testbenches**: you will be able to extensively test the functionality of the design to verify that it functions properly, as well as try out various input image scenarios.
+  
+- **Reference model to visualize results**: tool available if you don't have a ready FPGA and just want to preview the resulting image or have a reference before you apply the algorithm using the accelerator.
+
 ## The process
+
+Understanding the bilinear downscaling algorithm and replicating it using Python, as well as testing some images to preview how the final result should look like.
+
+Serial processing was implemented first to make sure that the algorithm works properly in SystemVerilog and that the FPGA can properly read and write images.
+
+SIMD lanes were then described in theory and later defined as registers.
+
+Fixed point arithmetic was implemented and tested.
+
+A series of ModelSim testbenches were developed with the purpose of debugging.
 
 ## What I learned
 
