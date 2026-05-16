@@ -21,7 +21,17 @@ A hardware acclerator designed to be synthesized on a De1-SoC FPGA for the purpo
 
 ## Pictures
 
+### JTAG console response
 
+<img width="1115" height="628" alt="Image" src="https://github.com/user-attachments/assets/cbaf112f-ab7d-4523-9135-7a7843518a61" />
+
+### Block diagram
+
+<img width="589" height="248" alt="Image" src="https://github.com/user-attachments/assets/ffd3167d-edb9-498b-b554-922847aabd73" />
+
+### Test results
+
+<img width="649" height="752" alt="Image" src="https://github.com/user-attachments/assets/69872f83-6b98-4899-81c3-e2c571d0add8" />
 
 ## Acknowledgements
 
